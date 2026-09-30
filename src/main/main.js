@@ -6,7 +6,7 @@ const { execFile } = require('child_process');
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 
 const { Store } = require('./store');
-const { PtyManager, commandFor } = require('./ptyManager');
+const { PtyManager, commandFor, shellCommand } = require('./ptyManager');
 const claudeSessions = require('./claudeSessions');
 const codexSessions = require('./codexSessions');
 const usage = require('./usage');
@@ -89,6 +89,7 @@ function spawnArgs({ kind, sessionId, name, prompt }) {
     if (sessionId) return { cmd: 'codex', args: ['resume', sessionId], sessionId };
     return { cmd: 'codex', args: prompt ? [prompt] : [], sessionId: null };
   }
+  if (kind === 'shell') return { ...shellCommand(), sessionId: null, raw: true };
   if (kind === 'login') return { cmd: 'claude', args: ['auth', 'login'], sessionId: null };
   if (kind === 'codex-login') return { cmd: 'codex', args: ['login'], sessionId: null };
   throw new Error(`unknown pane kind ${kind}`);
@@ -153,10 +154,11 @@ function registerIpc() {
 
   ipcMain.handle('pane:spawn', (_e, opts) => {
     // 上限以「每個專案」計算：不同專案的 workspace 可以同時在背景跑
-    const running = [...panes.values()].filter((p) => p.cwd === opts.cwd && (p.kind === 'claude' || p.kind === 'codex')).length;
-    if ((opts.kind === 'claude' || opts.kind === 'codex') && running >= MAX_PANES) throw new Error('E_MAX_PANES');
+    const inGrid = (k) => k === 'claude' || k === 'codex' || k === 'shell';
+    const running = [...panes.values()].filter((p) => p.cwd === opts.cwd && inGrid(p.kind)).length;
+    if (inGrid(opts.kind) && running >= MAX_PANES) throw new Error('E_MAX_PANES');
     const profile = store.profile(opts.profileId || store.data.activeProfile);
-    const { cmd, args, sessionId } = spawnArgs(opts);
+    const { cmd, args, sessionId, raw } = spawnArgs(opts);
     const paneId = crypto.randomUUID();
     const cwd = opts.cwd;
     panes.set(paneId, { kind: opts.kind, cwd, sessionId, profileId: profile.id });
@@ -165,7 +167,7 @@ function registerIpc() {
       store.save();
     }
     const since = Date.now();
-    ptys.spawn(paneId, { cmd, args, cwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows });
+    ptys.spawn(paneId, { cmd, args, cwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows, raw });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
     return { paneId, sessionId, profileId: profile.id };
   });
@@ -179,7 +181,10 @@ function registerIpc() {
   });
 
   ipcMain.handle('layout:save', (_e, cwd, list) => {
-    store.project(cwd).panes = list.filter((p) => p.sessionId && (p.kind === 'claude' || p.kind === 'codex')).slice(0, MAX_PANES);
+    // PowerShell 窗格沒有 session id，只記下名稱，還原時開一個新的
+    store.project(cwd).panes = list
+      .filter((p) => (p.sessionId && (p.kind === 'claude' || p.kind === 'codex')) || p.kind === 'shell')
+      .slice(0, MAX_PANES);
     store.save();
   });
 

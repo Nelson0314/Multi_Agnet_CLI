@@ -205,6 +205,9 @@ select:focus {
   color: var(--codex);
   border-color: color-mix(in srgb, var(--codex) 45%, transparent);
 }
+.tag.shell {
+  color: var(--text);
+}
 .tag.sub {
   color: var(--codex);
   border-style: dashed;
@@ -227,7 +230,12 @@ select:focus {
 }
 .side-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+}
+.side-actions .shell-btn {
+  flex-basis: 100%;
+  color: var(--muted);
 }
 .side-actions button {
   flex: 1;

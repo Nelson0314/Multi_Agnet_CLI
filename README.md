@@ -63,6 +63,7 @@ npm install
 | 開專案 | 左上角的專案按鈕 |
 | 開舊 session | 點左側清單。已開的會聚焦到該窗格 |
 | 新 session | `+ Claude` 或 `+ Codex`，可以先取名 |
+| 純終端機 | `+ PowerShell`（macOS、Linux 顯示為 `+ Shell`），在專案資料夾開一個一般的終端機。Windows 有裝 PowerShell 7 就用 `pwsh`，否則用內建的 Windows PowerShell。會跟著版面一起還原，也使用目前帳號的設定，所以在裡面打 `claude` 會用同一個帳號 |
 | 改名 | 雙擊窗格標題，或在清單上按右鍵 |
 | 最大化 | 窗格右上 `⤢` |
 | 切換窗格 | `Ctrl/⌘ + 1…6` |

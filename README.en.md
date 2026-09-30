@@ -61,6 +61,7 @@ Platform notes:
 | Open a project | Project button, top left |
 | Open a past session | Click it in the sidebar. An open one gets focused instead |
 | New session | `+ Claude` or `+ Codex`, optionally with a name |
+| Plain terminal | `+ PowerShell` (`+ Shell` on macOS and Linux) opens a normal terminal in the project folder. Windows uses `pwsh` when PowerShell 7 is installed, otherwise Windows PowerShell. It is restored with the layout and carries the active account's settings, so `claude` typed there uses the same account |
 | Rename | Double-click the pane title, or right-click in the list |
 | Maximize | `⤢` on the pane |
 | Focus pane N | `Ctrl/⌘ + 1…6` |

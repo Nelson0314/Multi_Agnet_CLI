@@ -50,3 +50,11 @@ test('buildEnv：null 會移除變數，預設宣告 truecolor', () => {
   assert.ok(!('COLORTERM' in buildEnv({ COLORTERM: null })));
   assert.strictEqual(buildEnv({ CLAUDE_CONFIG_DIR: '/x' }).CLAUDE_CONFIG_DIR, '/x');
 });
+
+test('shellCommand：Windows 優先 pwsh，其次 powershell.exe；其他平台用 $SHELL', () => {
+  const { shellCommand } = require('../src/main/ptyManager');
+  const env = { ProgramFiles: 'C:\\Program Files' };
+  assert.deepStrictEqual(shellCommand('win32', env, () => true), { cmd: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-NoLogo'] });
+  assert.deepStrictEqual(shellCommand('win32', env, () => false), { cmd: 'powershell.exe', args: ['-NoLogo'] });
+  assert.deepStrictEqual(shellCommand('darwin', { SHELL: '/bin/zsh' }), { cmd: '/bin/zsh', args: ['-l'] });
+});

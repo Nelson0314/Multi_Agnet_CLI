@@ -24,7 +24,8 @@ const pendingData = new Map();
 // ---------------------------------------------------------------- helpers
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const basename = (p) => (p || '').split(/[\\/]/).filter(Boolean).pop() || p;
-const kindLabel = (k) => (k === 'codex' ? 'Codex' : 'Claude');
+const shellLabel = () => (S.platform === 'win32' ? 'PowerShell' : 'Shell');
+const kindLabel = (k) => (k === 'codex' ? 'Codex' : k === 'shell' ? shellLabel() : 'Claude');
 const profileOf = (id) => S.profiles.find((p) => p.id === id) || S.profiles[0];
 
 // ---------------------------------------------------------------- i18n / theme
@@ -97,6 +98,8 @@ function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n)));
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
   document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+  $('#newShell').textContent = `+ ${shellLabel()}`;
+  $('#newShell').title = t('side.newShellTip', { kind: shellLabel() });
   $('#langBtn').textContent = S.lang === 'en' ? '中' : 'EN';
   $('#langBtn').title = S.lang === 'en' ? I18N['zh-Hant']['lang.name'] : I18N.en['lang.name'];
   renderAccount();
@@ -358,6 +361,7 @@ function layoutGrid(w) {
 }
 
 function paneTitle(p) {
+  if (p.kind === 'shell') return p.name || shellLabel();
   return p.name || t('session.new', { kind: kindLabel(p.kind) });
 }
 
@@ -378,6 +382,10 @@ function renderPaneHead(p) {
 }
 
 function renderPaneCtx(p) {
+  if (p.kind === 'shell') {
+    $('.ctx', p.el).innerHTML = `<span class="ellipsis">${esc(p.cwd)}</span>`;
+    return;
+  }
   const c = p.context;
   $('.ctx', p.el).innerHTML = c
     ? `<span>context</span>${bar(c.pct)}<span title="${esc(t('pane.contextTip', { used: c.tokens.toLocaleString(), total: c.window.toLocaleString() }))}">${c.pct.toFixed(0)}% · ${fmtTokens(c.tokens)} / ${fmtTokens(c.window)}</span>`
@@ -434,6 +442,7 @@ function startRename(p) {
     if (save && input.value.trim()) {
       p.name = input.value.trim();
       if (p.sessionId) api.setName(p.cwd, p.sessionId, p.name).then(refreshSessions);
+      else if (p.kind === 'shell') saveLayout(p.cwd);
     }
     titleEl.innerHTML = '';
     renderPaneHead(p);
@@ -567,7 +576,7 @@ function saveLayout(cwd) {
   if (!w) return;
   api.saveLayout(
     cwd,
-    w.panes.map((p) => ({ kind: p.kind, sessionId: p.sessionId, profileId: p.profileId })),
+    w.panes.map((p) => ({ kind: p.kind, sessionId: p.sessionId, profileId: p.profileId, ...(p.kind === 'shell' ? { name: p.name } : {}) })),
   );
 }
 
@@ -614,6 +623,7 @@ function hideBanner(p) {
 }
 
 function handleLimit(p, text) {
+  if (p.kind === 'shell') return;
   refreshUsage(true);
   if (S.settings.fallback === 'off') return;
   const acts = fallbackActions(p);
@@ -680,11 +690,11 @@ function paneMenu(p) {
     }
     items.push({ label: t('pane.toCodexNew'), onClick: () => handoff(p, 'codex') });
     items.push({ label: t('pane.toCodexHere'), onClick: () => handoff(p, 'codex', { inPlace: true }) });
-  } else {
+  } else if (p.kind === 'codex') {
     items.push({ label: t('pane.toClaudeNew'), onClick: () => handoff(p, 'claude') });
     items.push({ label: t('pane.toClaudeHere'), onClick: () => handoff(p, 'claude', { inPlace: true }) });
   }
-  items.push('-');
+  if (items.length) items.push('-');
   items.push({ label: t('pane.restart'), onClick: () => restartPane(p) });
   items.push({ label: t('pane.rename'), onClick: () => startRename(p) });
   return items;
@@ -704,6 +714,10 @@ async function openProject(cwd, { restore = true } = {}) {
   await refreshSessions();
   if (!existed && restore && S.settings.autoRestore && info.panes.length) {
     for (const saved of info.panes) {
+      if (saved.kind === 'shell') {
+        await spawnPane({ kind: 'shell', name: saved.name || null, profileId: saved.profileId, cwd });
+        continue;
+      }
       const s = findSession(saved.kind, saved.sessionId);
       await spawnPane({ kind: saved.kind, sessionId: saved.sessionId, profileId: saved.profileId, name: s ? s.title : info.names[saved.sessionId], cwd });
     }
@@ -788,8 +802,9 @@ function openSession(s) {
 
 async function newSession(kind) {
   if (!S.cwd) return pickProject();
-  const name = await promptModal(t('new.title', { kind: kindLabel(kind) }), {
-    placeholder: t('new.placeholder'),
+  const shell = kind === 'shell';
+  const name = await promptModal(t(shell ? 'new.shellTitle' : 'new.title', { kind: kindLabel(kind) }), {
+    placeholder: t(shell ? 'new.shellPlaceholder' : 'new.placeholder'),
     hint: t('new.hint'),
   });
   if (name === null) return;
@@ -1051,9 +1066,9 @@ function renderDashboard() {
 
   let ctx = '';
   for (const [cwd, w] of S.workspaces) {
-    if (!w.panes.length) continue;
+    if (!w.panes.some((x) => x.kind !== 'shell')) continue;
     ctx += `<div class="sub group">${esc(basename(cwd))}</div>`;
-    for (const p of w.panes) {
+    for (const p of w.panes.filter((x) => x.kind !== 'shell')) {
       const c = p.context;
       ctx += `<div class="card"><div class="head"><span class="tag ${p.kind}">${kindLabel(p.kind)}</span><span class="ellipsis">${esc(
         paneTitle(p),
@@ -1175,6 +1190,7 @@ async function boot() {
   }).observe($('#workspaces'));
   $('#newClaude').onclick = () => newSession('claude');
   $('#newCodex').onclick = () => newSession('codex');
+  $('#newShell').onclick = () => newSession('shell');
   $('#search').oninput = (e) => {
     S.search = e.target.value;
     renderSessionList();
