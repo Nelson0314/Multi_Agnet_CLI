@@ -40,7 +40,7 @@ npm install
 | macOS | `~/Desktop/Multi-Agent CLI.app` |
 | Linux | `~/Desktop/multi-agent-cli.desktop`，也會加進應用程式選單 |
 
-之後雙擊捷徑就能開。捷徑刪掉了可以用 `npm run shortcut` 重建；不想要捷徑的話，安裝時設定 `MULTI_AGENT_NO_SHORTCUT=1`。也可以直接在專案資料夾執行 `npm start`。
+之後雙擊捷徑就能開。安裝時如果顯示「找不到桌面資料夾」而沒有建立捷徑，或是捷徑刪掉了，可以用 `npm run shortcut` 重建；不想要捷徑的話，安裝時設定 `MULTI_AGENT_NO_SHORTCUT=1`。也可以直接在專案資料夾執行 `npm start`。
 
 更新：
 

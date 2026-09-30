@@ -20,11 +20,27 @@ function electronBinary() {
 
 function desktopDir() {
   if (process.platform === 'win32') {
-    // 處理被 OneDrive 重新導向的桌面
+    // 處理被 OneDrive 重新導向、名稱是中文（例如 OneDrive\桌面）的桌面。
+    // PowerShell 的標準輸出用主控台字碼頁（繁中是 CP950），直接當 UTF-8 解碼會變亂碼，
+    // 所以讓它輸出 UTF-8 位元組的 Base64，只有 ASCII 字元，不受字碼頁影響。
     try {
-      const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', "[Environment]::GetFolderPath('Desktop')"], { encoding: 'utf8' }).trim();
-      if (out) return out;
+      const b64 = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-Command', "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([Environment]::GetFolderPath('Desktop')))"],
+        { encoding: 'ascii' },
+      ).trim();
+      const out = Buffer.from(b64, 'base64').toString('utf8');
+      if (out && fs.existsSync(out)) return out;
     } catch {}
+    const home = os.homedir();
+    const candidates = [
+      process.env.OneDrive && path.join(process.env.OneDrive, 'Desktop'),
+      process.env.OneDrive && path.join(process.env.OneDrive, '桌面'),
+      path.join(home, 'OneDrive', 'Desktop'),
+      path.join(home, 'OneDrive', '桌面'),
+    ].filter(Boolean);
+    const found = candidates.find((p) => fs.existsSync(p));
+    if (found) return found;
   }
   if (process.platform === 'linux') {
     try {
