@@ -5,6 +5,7 @@ const path = require('path');
 const os = require('os');
 const { readAll, readTail, readHead } = require('./jsonl');
 const { truncate, isInside } = require('./claudeSessions');
+const { readCodexNames } = require('./titles');
 
 function defaultCodexHome() {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -140,13 +141,15 @@ function samePath(a, b) {
 
 function listSessions(cwd, codexHome = defaultCodexHome()) {
   const out = [];
+  const names = readCodexNames(codexHome);
   for (const f of walkRollouts(path.join(codexHome, 'sessions'))) {
     try {
       // 先只讀檔頭判斷 cwd，避免把其他專案的大檔整個讀進來
       const meta = metaOf(readHead(f));
       if (!meta || !meta.cwd || !isInside(meta.cwd, cwd)) continue;
       const info = readSession(f);
-      if (info && info.messageCount > 0) out.push(info);
+      // /rename 或本程式設定的名稱（session_index.jsonl）優先
+      if (info && info.messageCount > 0) out.push({ ...info, title: names.get(info.id) || info.title });
     } catch {}
   }
   return out.sort((a, b) => b.mtime - a.mtime);

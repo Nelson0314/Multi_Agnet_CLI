@@ -300,11 +300,39 @@ api.onLimit((id, text) => {
   const p = paneByPty.get(id);
   if (p) handleLimit(p, text);
 });
+// 窗格互通：主程式來問窗格順序、畫面文字，或通知有訊息進來
+api.onBridgeAsk(async (reqId, method, args) => {
+  let value = null;
+  try {
+    if (method === 'listPanes') {
+      const w = S.workspaces.get(args.cwd);
+      value = (w ? w.panes : []).filter((p) => p.id).map((p, i) => ({ index: i + 1, paneId: p.id, kind: kindLabel(p.kind), title: paneTitle(p) }));
+    } else if (method === 'readScreen') {
+      const p = paneByPty.get(args.paneId);
+      if (p) {
+        const b = p.term.buffer.active;
+        const lines = [];
+        for (let i = Math.max(0, b.length - args.lines); i < b.length; i++) lines.push(b.getLine(i).translateToString(true));
+        value = lines.join('\n').replace(/\n+$/, '');
+      }
+    } else if (method === 'incoming') {
+      const p = paneByPty.get(args.paneId);
+      if (p) {
+        const w = S.workspaces.get(p.cwd);
+        const to = w ? w.panes.indexOf(p) + 1 : '?';
+        toast(t(args.confirm ? 'bridge.incomingConfirm' : 'bridge.incoming', { from: args.fromIndex, title: args.fromTitle, to }));
+        if (args.confirm) setFocus(p);
+      }
+    }
+  } catch {}
+  api.bridgeAnswer(reqId, value);
+});
+
 api.onSession((id, sessionId) => {
   const p = paneByPty.get(id);
   if (!p) return;
   p.sessionId = sessionId;
-  if (p.name) api.setName(p.cwd, sessionId, p.name);
+  if (p.name) api.setName(p.cwd, sessionId, p.name, p.kind, p.profileId);
   saveLayout(p.cwd);
   refreshSessions();
 });
@@ -436,7 +464,7 @@ function startRename(p) {
   const done = (save) => {
     if (save && input.value.trim()) {
       p.name = input.value.trim();
-      if (p.sessionId) api.setName(p.cwd, p.sessionId, p.name).then(refreshSessions);
+      if (p.sessionId) api.setName(p.cwd, p.sessionId, p.name, p.kind, p.profileId).then(refreshSessions);
       else if (p.kind === 'shell') saveLayout(p.cwd);
     }
     titleEl.innerHTML = '';
@@ -790,7 +818,7 @@ function renderSessionList() {
           onClick: async () => {
             const n = await promptModal(t('rename.session'), { value: sessionTitle(s) });
             if (n) {
-              await api.setName(S.cwd, s.id, n);
+              await api.setName(S.cwd, s.id, n, s.kind, S.activeProfile);
               refreshSessions();
             }
           },
@@ -891,6 +919,7 @@ function showAccountMenu(anchor) {
   items.push(
     '-',
     { label: t('profile.installMcp'), onClick: installMcp },
+    { label: t('profile.installBridge'), onClick: installBridge },
     { label: t('profile.codexLogin'), onClick: () => loginModal(cur, 'codex-login') },
   );
   showPopover(anchor, items);
@@ -979,6 +1008,12 @@ async function removeProfileFlow() {
   if (!ok) return;
   await api.removeProfile(cur.id);
   reloadProfiles();
+}
+
+async function installBridge() {
+  toast(t('bridge.installing'));
+  const r = await api.installBridge(S.activeProfile);
+  toast(r.ok ? t('bridge.installed', { out: r.output }) : t('mcp.failed', { out: r.output }), r.ok ? 'ok' : 'bad', 9000);
 }
 
 async function installMcp() {
@@ -1092,6 +1127,7 @@ function renderSettings() {
   $('#dashSettings').innerHTML = `
     <label>${esc(t('set.openAtLogin'))}<input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''}></label>
     <label>${esc(t('set.restore'))}<input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
+    <label title="${esc(t('set.bridgeConfirmHint'))}">${esc(t('set.bridgeConfirm'))}<input type="checkbox" id="setBridgeConfirm" ${st.bridgeConfirm !== false ? 'checked' : ''}></label>
     <label>${esc(t('set.fallback'))}<select id="setFallback">${opt('ask', t('set.fallback.ask'), st.fallback)}${opt('auto', t('set.fallback.auto'), st.fallback)}${opt(
       'off',
       t('set.fallback.off'),
@@ -1117,6 +1153,7 @@ function renderSettings() {
   };
   $('#setLogin').onchange = (e) => saveSettings({ openAtLogin: e.target.checked });
   $('#setRestore').onchange = (e) => saveSettings({ autoRestore: e.target.checked });
+  $('#setBridgeConfirm').onchange = (e) => saveSettings({ bridgeConfirm: e.target.checked });
   $('#setFallback').onchange = (e) => saveSettings({ fallback: e.target.value });
   $('#setOrder').onchange = (e) => saveSettings({ fallbackOrder: e.target.value.split(',') });
 }

@@ -13,6 +13,8 @@ const usage = require('./usage');
 const profiles = require('./profiles');
 const { createHandoff } = require('./handoff');
 const { setAutostart } = require('./autostart');
+const { Bridge } = require('./bridge');
+const titles = require('./titles');
 
 const MAX_PANES = 6;
 const ICON = path.join(__dirname, '..', '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
@@ -24,6 +26,25 @@ if (process.platform === 'win32') app.setAppUserModelId('io.github.nelson0314.mu
 let win;
 let store;
 let ptys;
+let bridge;
+const rendererAsks = new Map(); // reqId -> resolve
+
+// 主程式向介面查詢（窗格順序、畫面文字等只有介面知道的資訊）
+function askRenderer(method, args) {
+  return new Promise((resolve, reject) => {
+    if (!win || win.isDestroyed()) return reject(new Error('window closed'));
+    const id = crypto.randomUUID();
+    const timer = setTimeout(() => {
+      rendererAsks.delete(id);
+      reject(new Error('renderer timeout'));
+    }, 5000);
+    rendererAsks.set(id, (v) => {
+      clearTimeout(timer);
+      resolve(v);
+    });
+    win.webContents.send('bridge:ask', id, method, args);
+  });
+}
 const panes = new Map(); // paneId -> { kind, cwd, sessionId, profileId }
 
 function send(channel, ...args) {
@@ -96,6 +117,31 @@ function spawnArgs({ kind, sessionId, name, prompt }) {
   throw new Error(`unknown pane kind ${kind}`);
 }
 
+// session 名稱寫回 Claude / Codex（等同 /rename）。Claude 的 transcript 要等第一則訊息後才會建立，
+// 所以先排隊，每 3 秒重試直到寫入成功
+const pendingTitles = new Map(); // `${kind}:${id}` -> { kind, cwd, sessionId, name, profileId }
+
+function queueTitle(kind, cwd, sessionId, name, profileId) {
+  if (!name || !sessionId || (kind !== 'claude' && kind !== 'codex')) return;
+  pendingTitles.set(`${kind}:${sessionId}`, { kind, cwd, sessionId, name, profileId });
+  flushTitles();
+}
+
+function flushTitles() {
+  for (const [key, t] of pendingTitles) {
+    try {
+      const profile = store.profile(t.profileId || store.data.activeProfile);
+      const done =
+        t.kind === 'claude'
+          ? titles.setClaudeTitle(claudeSessions.sessionFile(t.cwd, t.sessionId, claudeRoot(profile)), t.sessionId, t.name)
+          : titles.setCodexTitle(codexHomeOf(profile), t.sessionId, t.name);
+      if (done) pendingTitles.delete(key);
+    } catch (e) {
+      console.warn('title:', e.message);
+    }
+  }
+}
+
 // 新開的 Codex session 沒辦法事先指定 id，開啟後輪詢 rollout 目錄把 id 找回來
 function discoverCodexSession(paneId, cwd, codexHome, since) {
   const known = new Set([...panes.values()].filter((p) => p.kind === 'codex' && p.sessionId).map((p) => p.sessionId));
@@ -166,13 +212,45 @@ function registerIpc() {
     if (opts.name && sessionId) {
       store.project(cwd).names[sessionId] = opts.name;
       store.save();
+      queueTitle(opts.kind, cwd, sessionId, opts.name, profile.id);
     }
     const since = Date.now();
     // 子資料夾或 worktree 裡的 session 在它原本的資料夾續跑，claude --resume 才找得到
     const runCwd = opts.runCwd && fs.existsSync(opts.runCwd) ? opts.runCwd : cwd;
-    ptys.spawn(paneId, { cmd, args, cwd: runCwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows, raw });
+    const env = { ...profiles.envFor(profile), ...(bridge ? bridge.envFor(paneId) : {}) };
+    ptys.spawn(paneId, { cmd, args, cwd: runCwd, env, cols: opts.cols, rows: opts.rows, raw });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
     return { paneId, sessionId, profileId: profile.id };
+  });
+
+  ipcMain.on('bridge:answer', (_e, id, value) => {
+    const done = rendererAsks.get(id);
+    if (done) {
+      rendererAsks.delete(id);
+      done(value);
+    }
+  });
+
+  // 把窗格互通的 MCP server 裝到 Claude（claude mcp add）與 Codex（~/.codex/config.toml）
+  ipcMain.handle('bridge:install', async (_e, profileId) => {
+    const p = store.profile(profileId || store.data.activeProfile);
+    const script = path.join(__dirname, '..', 'bridge', 'mcp.js');
+    const out = [];
+    const r = await runInShell('claude', ['mcp', 'add', '--scope', 'user', 'multi-agent', '--', 'node', script], profiles.envFor(p));
+    out.push(`claude: ${r.ok ? 'ok' : r.output}`);
+    try {
+      const home = codexHomeOf(p);
+      const cfg = path.join(home, 'config.toml');
+      const cur = fs.existsSync(cfg) ? fs.readFileSync(cfg, 'utf8') : '';
+      if (!/^\[mcp_servers\.multi-agent\]/m.test(cur)) {
+        fs.mkdirSync(home, { recursive: true });
+        fs.appendFileSync(cfg, `${cur && !cur.endsWith('\n') ? '\n' : ''}\n[mcp_servers.multi-agent]\ncommand = "node"\nargs = [${JSON.stringify(script)}]\n`);
+      }
+      out.push('codex: ok');
+    } catch (e) {
+      out.push(`codex: ${e.message}`);
+    }
+    return { ok: r.ok, output: out.join('\n') };
   });
 
   ipcMain.on('pty:write', (_e, id, data) => ptys.write(id, data));
@@ -191,11 +269,12 @@ function registerIpc() {
     store.save();
   });
 
-  ipcMain.handle('names:set', (_e, cwd, sessionId, name) => {
+  ipcMain.handle('names:set', (_e, cwd, sessionId, name, kind, profileId) => {
     const names = store.project(cwd).names;
     if (name) names[sessionId] = name;
     else delete names[sessionId];
     store.save();
+    queueTitle(kind, cwd, sessionId, name, profileId);
   });
 
   ipcMain.handle('context:get', (_e, items) => {
@@ -296,6 +375,20 @@ app.whenReady().then(() => {
   store = new Store(app.getPath('userData'));
   if (store.data.settings.openAtLogin) applyAutostart();
   ptys = new PtyManager(send);
+  bridge = new Bridge({
+    ptys,
+    panes,
+    askRenderer,
+    settings: () => store.data.settings,
+    transcriptFile: (pane) => {
+      const profile = store.profile(pane.profileId);
+      return pane.kind === 'codex'
+        ? codexSessions.findSessionFile(pane.sessionId, codexHomeOf(profile))
+        : claudeSessions.sessionFile(pane.cwd, pane.sessionId, claudeRoot(profile));
+    },
+  });
+  bridge.start();
+  setInterval(flushTitles, 3000);
   registerIpc();
   createWindow();
 });

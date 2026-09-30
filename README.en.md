@@ -107,6 +107,28 @@ Handoff files go to `.multi-agent/handoffs/` in the project and contain the orig
 
 In the dashboard settings you can choose Ask, Hand off automatically or Do nothing, and whether another account or Codex comes first.
 
+## Panes talking to each other
+
+"Let panes talk to each other" in the account menu installs an MCP server for both Claude (`claude mcp add`) and Codex (`~/.codex/config.toml`). Panes opened afterwards get four tools:
+
+| Tool | What it does |
+| --- | --- |
+| `list_panes` | Pane numbers, kinds and names in the current project |
+| `send_to_pane` | Put a message into another pane's input |
+| `read_pane` | Read another pane's latest reply, or the last screen lines of a shell pane |
+| `wait_for_reply` | Wait until a Claude or Codex pane finishes answering and return the reply |
+
+For example, tell the Claude pane "ask the Codex in pane 3 to review src/api.ts and summarize its reply". Claude calls the tools itself, and both sides of the conversation stay on screen.
+
+- Messages start with their source, such as `[from pane 2 · Claude · API refactor]`.
+- By default a message waits in the other pane's input until you press Enter. Turn off "Confirm pane messages" to send directly; the app then waits for 2 quiet seconds on the target first.
+- At most 12 messages between the same two panes in 10 minutes, so two agents cannot loop forever.
+- The server listens on localhost only, and its token is given only to panes opened by the app.
+
+## Session names
+
+The name you type for a new session, and any rename inside the app, is written back to Claude's and Codex's own records, the same as running `/rename`, so `claude -r` and `codex resume` show it too. For Claude the name is written once the first message creates the transcript.
+
 ## Where the data comes from
 
 | Data | Source |
@@ -127,6 +149,8 @@ Context usage is `input + cache_creation + cache_read` tokens of the last main-t
 - Codex usage comes from the last Codex reply, so it appears after you have used Codex once.
 - Limit detection matches terminal text. If a CLI changes its wording, update `LIMIT_PATTERNS` in `src/main/ptyManager.js`.
 - The Linux shortcut passes `--no-sandbox` because Electron installed from npm has no setuid `chrome-sandbox`.
+
+- Newer Codex versions can move sessions to a paginated, compressed format (after `codex migrate-rollouts --apply`). The app reads classic `rollout-*.jsonl` files only, so migrated sessions do not show up in the Codex tab.
 
 ## Development
 

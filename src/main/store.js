@@ -21,6 +21,7 @@ const DEFAULTS = {
     lang: null, // null：依系統語言
     fontSize: 13,
     fontFamily: '', // 空字串：用系統終端機預設字型
+    bridgeConfirm: true, // 窗格互通：訊息先放進對方輸入框，等使用者按 Enter
   },
 };
 

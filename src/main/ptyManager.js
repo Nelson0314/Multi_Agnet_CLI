@@ -70,11 +70,12 @@ class PtyManager {
       cwd: cwd || os.homedir(),
       env: buildEnv(env),
     });
-    const rec = { pty: p, buf: '', timer: null, tail: '', limitNotified: false };
+    const rec = { pty: p, buf: '', timer: null, tail: '', limitNotified: false, lastOutput: Date.now() };
     this.ptys.set(id, rec);
 
     p.onData((d) => {
       // 合併小塊輸出後再送 IPC，減少 6 個 pane 同時輸出時的負擔
+      rec.lastOutput = Date.now();
       rec.buf += d;
       if (!rec.timer) {
         rec.timer = setTimeout(() => {
@@ -103,6 +104,16 @@ class PtyManager {
   write(id, data) {
     const r = this.ptys.get(id);
     if (r) r.pty.write(data);
+  }
+
+  // 等到窗格安靜 quietMs 沒有輸出（最多等 maxMs），用來避免在 agent 忙碌時插話
+  async waitQuiet(id, quietMs, maxMs) {
+    const end = Date.now() + maxMs;
+    while (Date.now() < end) {
+      const r = this.ptys.get(id);
+      if (!r || Date.now() - r.lastOutput >= quietMs) return;
+      await new Promise((ok) => setTimeout(ok, 250));
+    }
   }
 
   resize(id, cols, rows) {

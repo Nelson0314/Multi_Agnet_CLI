@@ -111,6 +111,28 @@ Codex 當子 agent：帳號選單的「讓 Claude 可以呼叫 Codex」會執行
 
 儀表板的設定可以選「詢問我」「自動交接」「不處理」，以及先換帳號還是先交給 Codex。
 
+## 窗格之間對話
+
+帳號選單的「讓窗格之間可以對話」會把一個 MCP server 同時裝到 Claude（`claude mcp add`）與 Codex（`~/.codex/config.toml`）。之後開的窗格裡，agent 多了四個工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `list_panes` | 列出目前專案的窗格編號、類型、名稱 |
+| `send_to_pane` | 把訊息送進另一個窗格的輸入框 |
+| `read_pane` | 讀另一個窗格最新的回覆；PowerShell 窗格則讀最後幾行畫面 |
+| `wait_for_reply` | 等 Claude 或 Codex 窗格回覆完，再把回覆交回來 |
+
+例如在 Claude 窗格說「請窗格 3 的 Codex review 我剛改的 src/api.ts，等它回覆後整理重點」，Claude 會自己呼叫這些工具，兩邊的對話都在你眼前。
+
+- 訊息開頭會標示來源，例如 `[from pane 2 · Claude · API 重構]`。
+- 預設訊息只會放進對方的輸入框，由你按 Enter 才送出，可以在設定的「窗格訊息先確認」關掉。關掉後會等對方畫面安靜 2 秒才送。
+- 同一對窗格 10 分鐘內最多傳 12 則，避免兩個 agent 無限互相呼叫。
+- 連線只綁本機，token 只給這個程式開的窗格。
+
+## Session 名稱
+
+新增 session 時輸入的名稱，以及之後在程式裡改的名稱，都會寫回 Claude 與 Codex 自己的紀錄，效果跟在裡面打 `/rename` 一樣，所以 `claude -r` 和 `codex resume` 也看得到。Claude 的名稱會在送出第一則訊息、紀錄檔建立之後寫入。
+
 ## 資料來源
 
 | 資料 | 來源 |
@@ -131,6 +153,8 @@ Context 用量是最後一次主線回覆的 `input + cache_creation + cache_rea
 - Codex 的額度來自最近一次 Codex 回覆寫下的紀錄，用過 Codex 之後才有資料。
 - 額度用完的偵測靠比對終端機文字。CLI 改了措辭時要更新 `src/main/ptyManager.js` 的 `LIMIT_PATTERNS`。
 - Linux 捷徑帶 `--no-sandbox`，因為 npm 安裝的 Electron 沒有設定 setuid 的 `chrome-sandbox`。
+
+- Codex 新版開始把 session 改存成分頁、壓縮的格式（`codex migrate-rollouts --apply` 之後）。目前只讀得到傳統的 `rollout-*.jsonl`，遷移過的 session 不會出現在 Codex 分頁。
 
 ## 開發
 
