@@ -1075,7 +1075,7 @@ function renderSettings() {
     <label>${esc(t('set.fontSize'))}<select id="setFontSize">${[11, 12, 13, 14, 15, 16].map((n) => opt(n, `${n}px`, st.fontSize || 13)).join('')}</select></label>
     <label>${esc(t('set.font'))}<input id="setFont" value="${esc(st.fontFamily || '')}" placeholder="${esc(t('set.fontPlaceholder'))}" /></label>`;
   $('#dashSettings').innerHTML = `
-    <label>${esc(t('set.openAtLogin'))}<input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''} ${S.platform === 'linux' ? 'disabled' : ''}></label>
+    <label>${esc(t('set.openAtLogin'))}<input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''}></label>
     <label>${esc(t('set.restore'))}<input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
     <label>${esc(t('set.fallback'))}<select id="setFallback">${opt('ask', t('set.fallback.ask'), st.fallback)}${opt('auto', t('set.fallback.auto'), st.fallback)}${opt(
       'off',

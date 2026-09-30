@@ -12,6 +12,7 @@ const codexSessions = require('./codexSessions');
 const usage = require('./usage');
 const profiles = require('./profiles');
 const { createHandoff } = require('./handoff');
+const { setAutostart } = require('./autostart');
 
 const MAX_PANES = 6;
 const ICON = path.join(__dirname, '..', '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
@@ -271,8 +272,7 @@ function registerIpc() {
 
   ipcMain.handle('settings:set', (_e, patch) => {
     Object.assign(store.data.settings, patch);
-    // 開機自動啟動（macOS / Windows 的登入項目）
-    if ('openAtLogin' in patch && process.platform !== 'linux') app.setLoginItemSettings({ openAtLogin: !!patch.openAtLogin });
+    if ('openAtLogin' in patch) applyAutostart();
     store.save();
     return store.data.settings;
   });
@@ -280,9 +280,19 @@ function registerIpc() {
   ipcMain.handle('shell:openPath', (_e, p) => shell.openPath(p));
 }
 
+// 開機自動啟動：連同專案路徑一起登記。每次啟動都重新套用，路徑變動或舊版的錯誤登記都會被修正
+function applyAutostart() {
+  try {
+    setAutostart(!!store.data.settings.openAtLogin, { app, electron: process.execPath, root: app.getAppPath() });
+  } catch (e) {
+    console.warn('autostart:', e.message);
+  }
+}
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(path.join(__dirname, '..', '..', 'assets', 'icon.png'));
   store = new Store(app.getPath('userData'));
+  if (store.data.settings.openAtLogin) applyAutostart();
   ptys = new PtyManager(send);
   registerIpc();
   createWindow();
