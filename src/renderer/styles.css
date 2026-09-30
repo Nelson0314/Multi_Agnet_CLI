@@ -36,6 +36,13 @@ body {
   background: var(--bg);
   overflow: hidden;
 }
+/* 不顯示捲軸（Windows 預設的白色捲軸很突兀），滑鼠滾輪與觸控板照樣可以捲動 */
+* {
+  scrollbar-width: none;
+}
+::-webkit-scrollbar {
+  display: none;
+}
 ::selection {
   background: var(--sel);
 }
@@ -498,10 +505,7 @@ select:focus {
 .pane.exited .term {
   opacity: 0.55;
 }
-.xterm .xterm-viewport {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
-}
+
 
 /* ---------- dashboard ---------- */
 #dashboard {
