@@ -18,6 +18,21 @@
 
     <div id="layout">
       <aside id="sidebar">
+        <!-- 收起時的窄條 -->
+        <div class="side-rail">
+          <button id="railExpand" class="icon rail-btn" data-i18n-title="side.expand">›</button>
+          <button id="railClaude" class="rail-btn" data-i18n-title="side.newClaude">+C</button>
+          <button id="railCodex" class="rail-btn" data-i18n-title="side.newCodex">+X</button>
+          <button id="railShell" class="rail-btn">+&gt;</button>
+          <div id="railList" class="rail-list"></div>
+          <div id="railCount" class="rail-foot"></div>
+        </div>
+        <!-- 完整側欄：固定展開時在版面裡，收起時滑鼠移上來會浮在窗格上方 -->
+        <div class="side-panel">
+        <div class="side-head">
+          <span class="side-title" data-i18n="side.sessions"></span>
+          <button id="sideCollapse" class="icon" data-i18n-title="side.collapse">‹</button>
+        </div>
         <div class="side-actions">
           <button id="newClaude" data-i18n="side.newClaude"></button>
           <button id="newCodex" data-i18n="side.newCodex"></button>
@@ -31,6 +46,7 @@
         </div>
         <ul id="sessionList" class="session-list"></ul>
         <div class="side-foot" id="paneCount"></div>
+        </div>
       </aside>
 
       <main id="workspaces">

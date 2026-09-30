@@ -100,6 +100,7 @@ function applyLang() {
   document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
   $('#newShell').textContent = `+ ${shellLabel()}`;
   $('#newShell').title = t('side.newShellTip', { kind: shellLabel() });
+  $('#railShell').title = `+ ${shellLabel()}`;
   renderAccount();
   for (const p of allPanes()) {
     renderPaneHead(p);
@@ -785,6 +786,7 @@ async function refreshSessions() {
 }
 
 function renderSessionList() {
+  renderRail();
   const list = $('#sessionList');
   const openIds = new Set((ws() ? ws().panes : []).map((p) => p.sessionId));
   $('#countClaude').textContent = S.sessions.claude.length || '';
@@ -830,7 +832,55 @@ function renderSessionList() {
   }
 }
 
+// 收起時窄條上的 session：名稱第一個字，已開啟的加框，滑鼠停留顯示完整名稱
+function renderRail() {
+  const rail = $('#railList');
+  if (!rail) return;
+  const openIds = new Set((ws() ? ws().panes : []).map((p) => p.sessionId));
+  rail.innerHTML = '';
+  for (const s of S.sessions[S.tab] || []) {
+    const d = document.createElement('div');
+    d.className = `rail-item ${openIds.has(s.id) ? 'open' : ''}`;
+    d.textContent = Array.from(sessionTitle(s).replace(/^[\s/[(]+/, ''))[0] || '·';
+    d.title = sessionTitle(s);
+    d.onclick = () => openSession(s);
+    rail.appendChild(d);
+  }
+  $('#railCount').textContent = `${ws() ? ws().panes.length : 0}/${S.maxPanes}`;
+}
+
+// 側欄收起／展開。收起時滑鼠移上來會暫時浮出完整側欄（peek），移開後收回
+function applySidebar() {
+  const pinned = !!S.settings.sidebarPinned;
+  $('#sidebar').classList.toggle('collapsed', !pinned);
+  if (pinned) $('#sidebar').classList.remove('peek');
+}
+
+async function setSidebarPinned(pinned) {
+  await saveSettings({ sidebarPinned: pinned });
+  applySidebar();
+}
+
+function setupSidebarPeek() {
+  const sb = $('#sidebar');
+  let timer;
+  const busy = () => document.activeElement === $('#search') || S.search || !$('#popover').hidden || !$('#modal').hidden;
+  sb.addEventListener('mouseenter', () => {
+    clearTimeout(timer);
+    if (sb.classList.contains('collapsed')) timer = setTimeout(() => sb.classList.add('peek'), 120);
+  });
+  sb.addEventListener('mouseleave', () => {
+    clearTimeout(timer);
+    const close = () => {
+      if (busy()) timer = setTimeout(close, 600);
+      else sb.classList.remove('peek');
+    };
+    timer = setTimeout(close, 350);
+  });
+}
+
 function openSession(s) {
+  $('#sidebar').classList.remove('peek');
   const w = ws();
   const existing = w && w.panes.find((p) => p.sessionId === s.id);
   if (existing) return setFocus(existing);
@@ -1220,6 +1270,13 @@ async function boot() {
   $('#newClaude').onclick = () => newSession('claude');
   $('#newCodex').onclick = () => newSession('codex');
   $('#newShell').onclick = () => newSession('shell');
+  $('#railClaude').onclick = () => newSession('claude');
+  $('#railCodex').onclick = () => newSession('codex');
+  $('#railShell').onclick = () => newSession('shell');
+  $('#railExpand').onclick = () => setSidebarPinned(true);
+  $('#sideCollapse').onclick = () => setSidebarPinned(false);
+  setupSidebarPeek();
+  applySidebar();
   $('#refreshList').onclick = async () => {
     const btn = $('#refreshList');
     btn.classList.add('spinning');
@@ -1239,6 +1296,10 @@ async function boot() {
   });
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && /^[1-6]$/.test(e.key)) focusPaneIndex(Number(e.key) - 1);
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      setSidebarPinned(!S.settings.sidebarPinned);
+    }
   });
   window.addEventListener('focus', refreshSessions);
 
