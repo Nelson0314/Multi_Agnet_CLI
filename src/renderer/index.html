@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' file:" />
+    <title>Multi-Agent CLI</title>
+    <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <div class="brand">⧉ Multi-Agent</div>
+      <button id="projectBtn" class="project-btn" title="切換專案"><span id="projectName">選擇專案…</span> ▾</button>
+      <div class="spacer"></div>
+      <div id="meters" class="meters"></div>
+      <button id="dashBtn" class="ghost" title="儀表板">▦ 儀表板</button>
+      <button id="accountBtn" class="account-btn" title="帳號"><span class="avatar" id="accountAvatar">?</span><span id="accountName">帳號</span> ▾</button>
+    </header>
+
+    <div id="layout">
+      <aside id="sidebar">
+        <div class="side-actions">
+          <button id="newClaude" class="primary">＋ Claude</button>
+          <button id="newCodex">＋ Codex</button>
+        </div>
+        <input id="search" type="search" placeholder="搜尋 session…" />
+        <div class="tabs">
+          <button class="tab active" data-tab="claude">Claude <span id="countClaude"></span></button>
+          <button class="tab" data-tab="codex">Codex <span id="countCodex"></span></button>
+        </div>
+        <ul id="sessionList" class="session-list"></ul>
+        <div class="side-foot"><span id="paneCount">0 / 6</span> 個 session 開啟中</div>
+      </aside>
+
+      <main id="workspaces">
+        <div id="empty" class="empty">
+          <h2>選擇一個專案開始</h2>
+          <p>左側會列出該目錄底下所有 Claude / Codex session，點一下即可開啟（最多 6 個並排）。</p>
+          <button id="emptyPick" class="primary">開啟專案資料夾</button>
+          <ul id="recentList" class="recent-list"></ul>
+        </div>
+      </main>
+
+      <aside id="dashboard" hidden>
+        <h3>額度</h3>
+        <div id="dashUsage"></div>
+        <h3>開啟中 session 的 context 深度</h3>
+        <div id="dashContext"></div>
+        <h3>設定</h3>
+        <div id="dashSettings" class="settings"></div>
+      </aside>
+    </div>
+
+    <div id="popover" class="popover" hidden></div>
+    <div id="modal" class="modal" hidden><div class="modal-card" id="modalCard"></div></div>
+    <div id="toasts" class="toasts"></div>
+
+    <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

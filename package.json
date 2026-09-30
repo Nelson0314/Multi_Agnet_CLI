@@ -1,0 +1,22 @@
+{
+  "name": "multi-agent-cli",
+  "version": "0.1.0",
+  "description": "單一視窗管理同一專案下的多個 Claude Code / Codex session，含額度儀表板、帳號切換與 Codex fallback",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.0",
+    "electron": "^33.0.0"
+  },
+  "license": "MIT"
+}
