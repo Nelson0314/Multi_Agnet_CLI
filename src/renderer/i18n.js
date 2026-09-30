@@ -153,7 +153,7 @@ const I18N = {
     'set.fallback.auto': 'Hand off automatically',
     'set.fallback.off': 'Do nothing',
     'set.order': 'Order',
-    'set.order.profileFirst': 'Account → Codex',
+    'set.order.profileFirst': 'Account first',
     'set.order.codexFirst': 'Codex first',
 
     'err.E_MAX_PANES': 'At most {max} sessions can be open. Close one first.',

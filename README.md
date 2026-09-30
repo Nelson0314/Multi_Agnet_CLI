@@ -24,7 +24,7 @@
 
 ## 安裝
 
-需要 Node.js 20 以上，以及能在終端機執行並已登入的 `claude`。要用 Codex 的話另外需要 `codex`。
+需要 Node.js 22.12 以上，以及能在終端機執行並已登入的 `claude`。要用 Codex 的話另外需要 `codex`。
 
 ```bash
 git clone https://github.com/Nelson0314/Multi_Agnet_CLI.git

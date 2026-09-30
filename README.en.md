@@ -22,7 +22,7 @@ If you keep several Claude Code sessions open on one project, every reboot means
 
 ## Install
 
-You need Node.js 20 or newer and a working, signed-in `claude`. Install `codex` too if you want Codex.
+You need Node.js 22.12 or newer and a working, signed-in `claude`. Install `codex` too if you want Codex.
 
 ```bash
 git clone https://github.com/Nelson0314/Multi_Agnet_CLI.git
