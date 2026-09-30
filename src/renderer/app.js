@@ -216,16 +216,37 @@ function workspaceFor(cwd) {
   return w;
 }
 
-// 1→1×1、2→2×1、3→3×1、4→2×2、5→上 3 下 2、6→3×2，所有窗格平均分配空間
+// 自適應版面：依工作區長寬比挑欄數，讓每格接近終端機舒適的比例（寬:高 ≈ 1.4）。
+// 最後一列若不滿，該列窗格自動加寬，所以不管開幾個都會填滿整個區域、不留空格。
+const TARGET_ASPECT = 1.4;
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+
+function bestGrid(n, W, H) {
+  let best = null;
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const last = n - cols * (rows - 1);
+    const h = H / rows;
+    const off = (w) => Math.abs(Math.log(w / h / TARGET_ASPECT));
+    const cost = ((n - last) * off(W / cols) + last * off(W / last)) / n;
+    if (!best || cost < best.cost - 1e-9) best = { cols, rows, last, cost };
+  }
+  return best;
+}
+
 function layoutGrid(w) {
   const n = w.panes.length;
-  const spec = { 0: [1, 1], 1: [1, 1], 2: [2, 1], 3: [3, 1], 4: [2, 2], 5: [6, 2], 6: [3, 2] }[n];
-  w.el.style.gridTemplateColumns = `repeat(${spec[0]}, minmax(0, 1fr))`;
-  w.el.style.gridTemplateRows = `repeat(${spec[1]}, minmax(0, 1fr))`;
-  w.panes.forEach((p, i) => {
-    p.el.style.gridColumn = n === 5 ? `span ${i < 3 ? 2 : 3}` : '';
-    $('.pane-idx', p.el).textContent = `${i + 1}`;
-  });
+  const host = $('#workspaces');
+  if (n) {
+    const { cols, rows, last } = bestGrid(n, host.clientWidth || 1600, host.clientHeight || 900);
+    const L = (cols * last) / gcd(cols, last); // 欄數取最小公倍數，讓整列與最後一列都能平均分
+    w.el.style.gridTemplateColumns = `repeat(${L}, minmax(0, 1fr))`;
+    w.el.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+    w.panes.forEach((p, i) => {
+      p.el.style.gridColumn = `span ${i < n - last ? L / cols : L / last}`;
+    });
+  }
+  w.panes.forEach((p, i) => ($('.pane-idx', p.el).textContent = `${i + 1}`));
   $('#empty').hidden = !!S.cwd;
   $('#paneCount').textContent = `${n} / ${S.maxPanes}`;
 }
@@ -924,9 +945,9 @@ function renderDashboard() {
 
   const st = S.settings;
   $('#dashSettings').innerHTML = `
-    <label>登入電腦時自動開啟本程式 <input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''} ${S.platform === 'linux' ? 'disabled' : ''}></label>
-    <label>啟動後自動還原上次的 session <input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
-    <label>額度用完時
+    <label>開機自動啟動 <input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''} ${S.platform === 'linux' ? 'disabled' : ''}></label>
+    <label>還原上次的 session <input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
+    <label>額度用完
       <select id="setFallback">
         <option value="ask" ${st.fallback === 'ask' ? 'selected' : ''}>詢問我</option>
         <option value="auto" ${st.fallback === 'auto' ? 'selected' : ''}>自動接手</option>
@@ -934,8 +955,8 @@ function renderDashboard() {
       </select></label>
     <label>優先順序
       <select id="setOrder">
-        <option value="other-profile,codex" ${String(st.fallbackOrder) === 'other-profile,codex' ? 'selected' : ''}>先換 Claude 帳號，再交給 Codex</option>
-        <option value="codex,other-profile" ${String(st.fallbackOrder) === 'codex,other-profile' ? 'selected' : ''}>先交給 Codex</option>
+        <option value="other-profile,codex" ${String(st.fallbackOrder) === 'other-profile,codex' ? 'selected' : ''}>換帳號 → Codex</option>
+        <option value="codex,other-profile" ${String(st.fallbackOrder) === 'codex,other-profile' ? 'selected' : ''}>Codex 優先</option>
       </select></label>`;
   $('#setLogin').onchange = (e) => saveSettings({ openAtLogin: e.target.checked });
   $('#setRestore').onchange = (e) => saveSettings({ autoRestore: e.target.checked });
@@ -985,6 +1006,15 @@ async function boot() {
     renderDashboard();
   };
   $('#emptyPick').onclick = pickProject;
+  // 視窗縮放、開關儀表板時重新計算版面（各終端機再由自己的 ResizeObserver 重新 fit）
+  let relayoutTimer;
+  new ResizeObserver(() => {
+    clearTimeout(relayoutTimer);
+    relayoutTimer = setTimeout(() => {
+      const w = ws();
+      if (w) layoutGrid(w);
+    }, 50);
+  }).observe($('#workspaces'));
   $('#newClaude').onclick = () => newSession('claude');
   $('#newCodex').onclick = () => newSession('codex');
   $('#search').oninput = (e) => {
