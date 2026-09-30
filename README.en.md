@@ -14,7 +14,7 @@ If you keep several Claude Code sessions open on one project, every reboot means
 - Each pane is a real terminal (node-pty + xterm.js) running your own `claude` and `codex`.
 - Up to 6 panes. The grid follows the window's aspect ratio, and a short last row stretches so no cell is left empty.
 - Each pane header shows the session name, Claude or Codex, the account, and context usage such as `76% · 152k / 200k`.
-- A dashboard with 5-hour and weekly usage for every Claude account and for Codex, plus context for each open pane.
+- A dashboard with the remaining 5-hour and weekly quota for every Claude account and for Codex, colored by what is left (green above 50%, yellow 20–50%, red below 20%), plus context for each open pane.
 - Multiple Claude accounts. Each one is a `CLAUDE_CONFIG_DIR` with shared session history, so another account can `--resume` the same session.
 - When usage runs out, the pane offers to resume on another Claude account or to hand the work to Codex with a handoff file.
 - Five themes (Terminal, Graphite, Sand, Mono, Paper). The whole UI uses your system's terminal font, and the Claude and Codex labels keep their brand colors.
@@ -75,7 +75,7 @@ Closing a pane ends the process. The session stays on disk and can be reopened f
 
 ## Appearance
 
-The terminal font defaults to what your OS terminal uses: SF Mono or Menlo on macOS, Cascadia Mono or Consolas on Windows, DejaVu Sans Mono on Linux, with CJK fallbacks.
+The terminal font defaults to what your OS terminal uses: SF Mono or Menlo on macOS, Cascadia Mono or Consolas on Windows, DejaVu Sans Mono on Linux. Chinese text also uses monospaced fonts: Sarasa Mono TC, Noto Sans Mono CJK TC or the console font MingLiU on Windows, PingFang on macOS, Noto Sans Mono CJK TC on Linux. Set any other font in Terminal font.
 
 Themes only change the app's background, text and borders. Program output in the panes keeps its own colors, and the 16-color ANSI palette matches your OS terminal: Campbell from Windows Terminal, Terminal.app on macOS, Tango from GNOME Terminal on Linux.
 

@@ -80,6 +80,12 @@ function terminalFont(platform, custom) {
     win32: ['"Cascadia Mono"', 'Consolas', '"Courier New"'],
     linux: ['"DejaVu Sans Mono"', '"Ubuntu Mono"', '"Liberation Mono"'],
   }[platform] || ['Menlo', 'Consolas', '"DejaVu Sans Mono"'];
-  const cjk = ['"PingFang TC"', '"Microsoft JhengHei"', '"Noto Sans Mono CJK TC"', '"Noto Sans CJK TC"', 'monospace'];
+  // 中文也用等寬的終端機字型：Windows 是主控台用的細明體（MingLiU），不用微軟正黑體
+  const cjk = {
+    darwin: ['"PingFang TC"'],
+    win32: ['"Sarasa Mono TC"', '"Noto Sans Mono CJK TC"', 'MingLiU', '"細明體"'],
+    linux: ['"Noto Sans Mono CJK TC"', '"Sarasa Mono TC"'],
+  }[platform] || [];
+  cjk.push('monospace');
   return [custom && custom.trim() ? `"${custom.trim().replace(/"/g, '')}"` : null, 'ui-monospace', ...byPlatform, ...cjk].filter(Boolean).join(', ');
 }

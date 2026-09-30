@@ -14,7 +14,7 @@
 - 每個窗格是真正的終端機（node-pty + xterm.js），跑的就是你平常的 `claude` 和 `codex`。
 - 最多 6 格。版面依視窗長寬比自動排，最後一列不滿時會加寬，不會留空格。
 - 窗格上方顯示 session 名稱、Claude 或 Codex、使用的帳號，以及 context 用量（例如 `76% · 152k / 200k`）。
-- 儀表板顯示每個 Claude 帳號的 5 小時與每週額度、Codex 的 5 小時與每週額度，以及各窗格的 context。
+- 儀表板顯示每個 Claude 帳號與 Codex 的 5 小時、每週剩餘額度（依剩餘量變色：50% 以上綠、20–50% 黃、20% 以下紅），以及各窗格的 context。
 - 多個 Claude 帳號。每個帳號是一個 `CLAUDE_CONFIG_DIR`，session 歷史共用，所以可以換帳號 `--resume` 同一個 session。
 - 額度用完時提供接手選項：換另一個 Claude 帳號續跑，或產生交接文件交給 Codex。
 - 五種主題（Terminal、Graphite、Sand、Mono、Paper），整個介面使用系統終端機的等寬字型。Claude 與 Codex 標籤用它們原本的品牌色。
@@ -77,7 +77,7 @@ npm install
 
 ## 外觀
 
-儀表板的「外觀」可以選主題、字級與終端機字型。字型預設跟系統終端機一樣：macOS 用 SF Mono 或 Menlo，Windows 用 Cascadia Mono 或 Consolas，Linux 用 DejaVu Sans Mono，中文 fallback 到蘋方、微軟正黑體或 Noto Sans Mono CJK。
+儀表板的「外觀」可以選主題、字級與終端機字型。字型預設跟系統終端機一樣：macOS 用 SF Mono 或 Menlo，Windows 用 Cascadia Mono 或 Consolas，Linux 用 DejaVu Sans Mono，中文也用等寬字：Windows 依序找更紗黑體 Sarasa Mono TC、Noto Sans Mono CJK TC、主控台用的細明體，macOS 用蘋方，Linux 用 Noto Sans Mono CJK TC。想指定別的字型，填在「終端機字型」。
 
 主題只改介面的背景、文字和分隔線。窗格裡程式輸出的顏色完全照原樣顯示，16 色 ANSI 色盤沿用系統原生終端機：Windows 是 Windows Terminal 的 Campbell，macOS 是 Terminal.app，Linux 是 GNOME Terminal 的 Tango。
 

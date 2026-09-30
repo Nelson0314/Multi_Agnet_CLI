@@ -109,7 +109,6 @@ function applyLang() {
   if (!S.cwd) $('#projectName').textContent = t('top.project');
   layoutGridIfAny();
   renderSessionList();
-  renderMeters();
   renderDashboard();
 }
 
@@ -861,7 +860,7 @@ function showAccountMenu(anchor) {
         await api.setActiveProfile(p.id);
         await reloadProfiles();
         refreshSessions();
-        renderMeters();
+        renderDashboard();
         toast(t('profile.switched', { name: profileName(p) }), 'ok');
       },
     };
@@ -980,7 +979,6 @@ async function refreshUsage(force = false) {
   } catch {
     return;
   }
-  renderMeters();
   renderDashboard();
   const u = S.usage.claude[S.activeProfile];
   if (u && u.ok && u.fiveHour && u.fiveHour.pct >= 100) {
@@ -1002,12 +1000,6 @@ async function refreshUsage(force = false) {
   }
 }
 
-function meter(label, w) {
-  if (!w || w.pct == null) return '';
-  const tip = `${label} ${w.pct.toFixed(1)}%${fmtReset(w.resetsAt) ? ` · ${t('reset.in', { t: fmtReset(w.resetsAt) })}` : ''}`;
-  return `<div class="meter" title="${esc(tip)}">${label} ${bar(w.pct)}<b>${Math.round(w.pct)}%</b></div>`;
-}
-
 function codexWindows(rl) {
   if (!rl) return [];
   return [rl.primary, rl.secondary].filter(Boolean).map((w) => ({
@@ -1017,25 +1009,17 @@ function codexWindows(rl) {
   }));
 }
 
-function renderMeters() {
-  if (!S.usage) return;
-  const u = S.usage.claude[S.activeProfile];
-  let html = '<div class="meter-group"><span class="tag claude">Claude</span>';
-  html += u && u.ok ? meter(t('usage.5h'), u.fiveHour) + meter(t('usage.week'), u.sevenDay) : `<span class="meter">${esc(u ? t(`usage.reason.${u.reason}`) : t('usage.loading'))}</span>`;
-  html += '</div><div class="meter-group"><span class="tag codex">Codex</span>';
-  const cw = codexWindows(S.usage.codex);
-  html += cw.length ? cw.map((w) => meter(w.label, w)).join('') : `<span class="meter">${esc(t('usage.noData'))}</span>`;
-  html += '</div>';
-  $('#meters').innerHTML = html;
-}
+// 剩餘額度的顏色：剩 50% 以上綠、20–50% 黃、20% 以下紅（跟是哪個工具無關）
+const leftClass = (left) => (left < 20 ? 'bad' : left < 50 ? 'warn' : '');
 
-// 一列額度：標籤、進度條、放大的百分比；重置倒數放在下一行的最弱層級
+// 一列額度（顯示剩餘）：標籤、進度條、剩餘百分比；重置倒數在下一行，對齊進度條
 function usageRow(label, w) {
   if (!w || w.pct == null) return '';
+  const left = Math.max(0, Math.min(100, 100 - w.pct));
   const reset = fmtReset(w.resetsAt);
-  return `<div class="row"><span class="label">${esc(label)}</span>${bar(w.pct)}<span class="val">${Math.round(w.pct)}%</span></div>${
-    reset ? `<div class="reset">${esc(t('reset.in', { t: reset }))}</div>` : ''
-  }`;
+  return `<div class="urow"><span class="label">${esc(label)}</span><div class="bar ${leftClass(left)}"><i style="width:${left}%"></i></div><span class="val">${esc(
+    t('usage.left', { n: Math.round(left) }),
+  )}</span>${reset ? `<span class="reset">${esc(t('reset.in', { t: reset }))}</span>` : ''}</div>`;
 }
 
 function renderDashboard() {
@@ -1043,7 +1027,7 @@ function renderDashboard() {
   let html = '';
   for (const p of S.profiles) {
     const u = S.usage && S.usage.claude[p.id];
-    html += `<div class="dsec"><div class="head"><span class="tag claude">Claude</span><span class="name">${esc(profileName(p))}</span>${p.id === S.activeProfile ? '<span class="sub">✓</span>' : ''}</div>
+    html += `<div class="dsec"><div class="head"><span class="name">Claude · ${esc(profileName(p))}</span>${p.id === S.activeProfile ? '<span class="sub">✓</span>' : ''}</div>
       <div class="sub">${esc((p.account && p.account.email) || t('profile.notLoggedIn'))}${u && u.plan ? ` · ${esc(u.plan)}` : ''}</div>`;
     if (u && u.ok)
       html +=
@@ -1052,7 +1036,7 @@ function renderDashboard() {
     html += '</div>';
   }
   const cw = codexWindows(S.usage && S.usage.codex);
-  html += `<div class="dsec"><div class="head"><span class="tag codex">Codex</span><span class="name">${esc(t('usage.codexPlan'))}</span></div>`;
+  html += `<div class="dsec"><div class="head"><span class="name">Codex · ${esc(t('usage.codexPlan'))}</span></div>`;
   html += cw.length
     ? cw.map((w) => usageRow(w.week ? t('usage.weekLong') : w.label === '5h' ? t('usage.5hLong') : w.label, w)).join('') +
       `<div class="sub">${esc(t('usage.codexAt', { t: S.usage.codex.observedAt ? fmtAgo(S.usage.codex.observedAt) : '–' }))}</div>`
@@ -1214,7 +1198,7 @@ async function boot() {
   setInterval(pollContext, 4000);
   setInterval(refreshSessions, 30_000);
   setInterval(() => refreshUsage(), (S.settings.usageRefreshSec || 120) * 1000);
-  setInterval(renderMeters, 60_000); // 更新重置倒數
+  setInterval(renderDashboard, 60_000); // 更新重置倒數
 }
 
 boot();

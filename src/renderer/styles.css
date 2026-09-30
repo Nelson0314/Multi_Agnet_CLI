@@ -14,7 +14,7 @@
   --warn: #b7a67e;
   --bad: #b48686;
   --sel: #383838;
-  --font: ui-monospace, 'SF Mono', Menlo, Consolas, 'Cascadia Mono', 'DejaVu Sans Mono', 'PingFang TC', 'Microsoft JhengHei', monospace;
+  --font: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', 'Noto Sans Mono CJK TC', MingLiU, monospace;
   --radius: 3px;
   /* 三層字級：主要（窗格標題、清單名稱、儀表板數字）、一般（按鈕、設定）、次要（時間、說明） */
   --fs-1: 15px;
@@ -150,28 +150,6 @@ select:focus {
   place-items: center;
   font-size: 10px;
   flex-shrink: 0;
-}
-.meters {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-.meter-group {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.meter {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.meter b {
-  color: var(--text);
-  font-weight: 400;
 }
 .bar {
   width: 60px;
@@ -559,29 +537,38 @@ select:focus {
   font-weight: 600;
   min-width: 0;
 }
-.dsec .row {
-  display: flex;
+/* 額度列：標籤 | 進度條 | 剩餘百分比，重置倒數在第二行對齊進度條 */
+.dsec .urow {
+  display: grid;
+  grid-template-columns: 56px 1fr 64px;
+  column-gap: 8px;
+  row-gap: 4px;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+  margin-top: 12px;
 }
-.dsec .row .label {
-  width: 56px;
+.dsec .urow .label {
   color: var(--muted);
   font-size: var(--fs-3);
 }
-.dsec .row .bar {
-  flex: 1;
+.dsec .urow .bar {
+  width: auto;
+  height: 6px;
+  border-radius: 3px;
 }
-.dsec .val {
-  font-size: var(--fs-1);
+.dsec .urow .val {
+  font-size: var(--fs-name);
   font-weight: 600;
-  min-width: 44px;
   text-align: right;
+  white-space: nowrap;
 }
-.dsec .reset {
+.dsec .urow .reset {
+  grid-column: 2 / 4;
   color: var(--faint);
   font-size: var(--fs-3);
+}
+.dsec .val {
+  font-size: var(--fs-name);
+  font-weight: 600;
   text-align: right;
 }
 .dsec .sub {
@@ -599,6 +586,15 @@ select:focus {
 }
 .ctx-item > .bar {
   width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  margin-top: 4px;
+}
+.ctx-item .reset {
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: var(--fs-3);
+  text-align: right;
 }
 .sub.group {
   margin: 8px 0;
