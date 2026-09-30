@@ -65,7 +65,7 @@ Platform notes:
 | Rename | Double-click the pane title, or right-click in the list |
 | Maximize | `⤢` on the pane |
 | Focus pane N | `Ctrl/⌘ + 1…6` |
-| Sidebar | Collapsed to a narrow rail by default, with the new-session buttons and each session's first character; hover to float the full sidebar over the panes. `‹` `›` or `Ctrl/⌘ + B` keeps it open or collapses it |
+| Sidebar | Collapsed to a thin strip with a single `›` by default; hover to float the full sidebar over the panes. `‹` `›` or `Ctrl/⌘ + B` keeps it open or collapses it |
 | Copy, paste | `⌘C` `⌘V` on macOS; `Ctrl+Shift+C` `Ctrl+Shift+V` on Windows and Linux. `Ctrl+V` stays with Claude Code for pasting images |
 | Resume on another account, hand off | `⇄` on the pane |
 | Sign in, add or switch accounts | Account menu, top right |
