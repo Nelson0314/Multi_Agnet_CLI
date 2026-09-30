@@ -21,11 +21,26 @@
 需求：Node.js 20+、已安裝並可在終端機執行的 `claude`（Claude Code），想用 Codex 的話另外需要 `codex`（Codex CLI）。
 
 ```bash
-git clone <this repo>
+git clone https://github.com/Nelson0314/Multi_Agnet_CLI.git
 cd Multi_Agnet_CLI
 npm install     # 會自動處理 node-pty 原生模組（macOS / Windows 直接使用 prebuild）
 npm start
 ```
+
+之後要更新到最新版：
+
+```bash
+cd Multi_Agnet_CLI
+git pull
+npm install
+npm start
+```
+
+平台注意事項：
+
+- **macOS / Windows**：不需要安裝編譯工具，`npm install` 完就能跑。
+- **Linux**：需要能編譯原生模組（`sudo apt install build-essential python3`），`npm install` 會自動編譯 node-pty。
+- 啟動前先確認在一般終端機裡打 `claude`（以及 `codex`）可以正常執行並已登入；本程式會透過你的 login shell 找這兩個指令。
 
 想要開機就自動開啟：在右側「儀表板 → 設定」勾選「登入電腦時自動開啟本程式」（macOS / Windows）。
 
