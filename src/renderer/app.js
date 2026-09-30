@@ -100,8 +100,6 @@ function applyLang() {
   document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
   $('#newShell').textContent = `+ ${shellLabel()}`;
   $('#newShell').title = t('side.newShellTip', { kind: shellLabel() });
-  $('#langBtn').textContent = S.lang === 'en' ? '中' : 'EN';
-  $('#langBtn').title = S.lang === 'en' ? I18N['zh-Hant']['lang.name'] : I18N.en['lang.name'];
   renderAccount();
   for (const p of allPanes()) {
     renderPaneHead(p);
@@ -373,7 +371,7 @@ function renderPaneHead(p) {
   const titleEl = $('.pane-title', head);
   if (!titleEl.querySelector('input')) {
     titleEl.textContent = paneTitle(p);
-    titleEl.title = `${paneTitle(p)}\n${p.sessionId || t('session.waitingId')}\n${t('session.renameHint')}`;
+    titleEl.title = `${paneTitle(p)}\n${p.kind === 'shell' ? p.cwd : p.sessionId || t('session.waitingId')}\n${t('session.renameHint')}`;
   }
   const pt = $('.tag.profile', head);
   pt.textContent = prof ? profileName(prof) : '';
@@ -381,33 +379,31 @@ function renderPaneHead(p) {
   p.el.className = `pane ${p.kind} ${S.focused === p ? 'focused' : ''} ${p.max ? 'max' : ''} ${p.exited ? 'exited' : ''}`;
 }
 
+// context 用量：標題列右側一個小百分比，加上標題列底部一條 2px 進度線；詳細數字放在提示文字
 function renderPaneCtx(p) {
-  if (p.kind === 'shell') {
-    $('.ctx', p.el).innerHTML = `<span class="ellipsis">${esc(p.cwd)}</span>`;
-    return;
-  }
-  const c = p.context;
-  $('.ctx', p.el).innerHTML = c
-    ? `<span>context</span>${bar(c.pct)}<span title="${esc(t('pane.contextTip', { used: c.tokens.toLocaleString(), total: c.window.toLocaleString() }))}">${c.pct.toFixed(0)}% · ${fmtTokens(c.tokens)} / ${fmtTokens(c.window)}</span>`
-    : `<span>context –</span>`;
+  const pctEl = $('.ctx', p.el);
+  const line = $('.ctx-line', p.el);
+  const c = p.kind === 'shell' ? null : p.context;
+  pctEl.textContent = c ? `${c.pct.toFixed(0)}%` : '';
+  pctEl.title = c ? t('pane.contextTip', { used: c.tokens.toLocaleString(), total: c.window.toLocaleString() }) : '';
+  line.className = `ctx-line ${c ? barClass(c.pct) : ''}`;
+  line.hidden = !c;
+  $('i', line).style.width = `${c ? Math.min(100, c.pct) : 0}%`;
 }
 
 function createPaneEl(p) {
   const el = document.createElement('div');
   el.innerHTML = `
     <div class="pane-head">
-      <div class="pane-row">
-        <span class="pane-idx"></span>
-        <span class="tag kind"></span>
-        <span class="pane-title"></span>
-        <button class="icon" data-act="menu">⇄</button>
-        <button class="icon" data-act="max">⤢</button>
-        <button class="icon" data-act="close">✕</button>
-      </div>
-      <div class="pane-row meta">
-        <div class="ctx"></div>
-        <span class="tag profile"></span>
-      </div>
+      <span class="pane-idx"></span>
+      <span class="tag kind"></span>
+      <span class="pane-title"></span>
+      <span class="tag profile"></span>
+      <span class="ctx"></span>
+      <button class="icon" data-act="menu">⇄</button>
+      <button class="icon" data-act="max">⤢</button>
+      <button class="icon" data-act="close">✕</button>
+      <div class="ctx-line"><i></i></div>
     </div>
     <div class="pane-banner" hidden></div>
     <div class="term"></div>`;
@@ -762,15 +758,14 @@ function renderSessionList() {
     const li = document.createElement('li');
     const open = openIds.has(s.id);
     li.className = open ? 'open' : '';
-    li.title = `${sessionTitle(s)}\n\n${t('session.first')}: ${s.firstPrompt || ''}\n${t('session.last')}: ${s.lastPrompt || ''}\n\n${s.id}`;
+    li.title = `${sessionTitle(s)}\n${t('unit.messages', { n: s.messageCount })}${s.context ? ` · context ${s.context.pct.toFixed(0)}%` : ''}\n\n${t('session.first')}: ${
+      s.firstPrompt || ''
+    }\n${t('session.last')}: ${s.lastPrompt || ''}\n\n${s.id}`;
     li.innerHTML = `
       <div class="s-title"><span>${esc(sessionTitle(s))}</span>${open ? `<i class="dot" title="${esc(t('session.openNow'))}"></i>` : ''}${
         s.spawnedByAgent ? `<span class="tag sub" title="${esc(t('session.subagentTip'))}">${esc(t('session.subagent'))}</span>` : ''
       }</div>
-      <div class="s-meta"><span>${fmtAgo(s.mtime)}</span><span>· ${t('unit.messages', { n: s.messageCount })}</span>${
-        s.context ? `<span>· ctx ${s.context.pct.toFixed(0)}%</span>` : ''
-      }</div>
-      <div class="s-prompt">${esc(s.lastPrompt || '')}</div>`;
+      <div class="s-meta"><span>${fmtAgo(s.mtime)}</span>${s.context ? `<span class="sep">·</span>${bar(s.context.pct)}` : ''}</div>`;
     li.onclick = () => openSession(s);
     li.oncontextmenu = (e) => {
       e.preventDefault();
@@ -1034,11 +1029,13 @@ function renderMeters() {
   $('#meters').innerHTML = html;
 }
 
+// 一列額度：標籤、進度條、放大的百分比；重置倒數放在下一行的最弱層級
 function usageRow(label, w) {
   if (!w || w.pct == null) return '';
-  return `<div class="row"><span class="label">${label}</span>${bar(w.pct)}<span class="val">${Math.round(w.pct)}%</span><span class="reset">${
-    fmtReset(w.resetsAt) ? esc(t('reset.in', { t: fmtReset(w.resetsAt) })) : ''
-  }</span></div>`;
+  const reset = fmtReset(w.resetsAt);
+  return `<div class="row"><span class="label">${esc(label)}</span>${bar(w.pct)}<span class="val">${Math.round(w.pct)}%</span></div>${
+    reset ? `<div class="reset">${esc(t('reset.in', { t: reset }))}</div>` : ''
+  }`;
 }
 
 function renderDashboard() {
@@ -1046,7 +1043,7 @@ function renderDashboard() {
   let html = '';
   for (const p of S.profiles) {
     const u = S.usage && S.usage.claude[p.id];
-    html += `<div class="card"><div class="head"><span class="tag claude">Claude</span>${esc(profileName(p))}${p.id === S.activeProfile ? ' ✓' : ''}</div>
+    html += `<div class="dsec"><div class="head"><span class="tag claude">Claude</span><span class="name">${esc(profileName(p))}</span>${p.id === S.activeProfile ? '<span class="sub">✓</span>' : ''}</div>
       <div class="sub">${esc((p.account && p.account.email) || t('profile.notLoggedIn'))}${u && u.plan ? ` · ${esc(u.plan)}` : ''}</div>`;
     if (u && u.ok)
       html +=
@@ -1055,7 +1052,7 @@ function renderDashboard() {
     html += '</div>';
   }
   const cw = codexWindows(S.usage && S.usage.codex);
-  html += `<div class="card"><div class="head"><span class="tag codex">Codex</span>${esc(t('usage.codexPlan'))}</div>`;
+  html += `<div class="dsec"><div class="head"><span class="tag codex">Codex</span><span class="name">${esc(t('usage.codexPlan'))}</span></div>`;
   html += cw.length
     ? cw.map((w) => usageRow(w.week ? t('usage.weekLong') : w.label === '5h' ? t('usage.5hLong') : w.label, w)).join('') +
       `<div class="sub">${esc(t('usage.codexAt', { t: S.usage.codex.observedAt ? fmtAgo(S.usage.codex.observedAt) : '–' }))}</div>`
@@ -1070,12 +1067,9 @@ function renderDashboard() {
     ctx += `<div class="sub group">${esc(basename(cwd))}</div>`;
     for (const p of w.panes.filter((x) => x.kind !== 'shell')) {
       const c = p.context;
-      ctx += `<div class="card"><div class="head"><span class="tag ${p.kind}">${kindLabel(p.kind)}</span><span class="ellipsis">${esc(
-        paneTitle(p),
-      )}</span></div>
-        <div class="row">${bar(c ? c.pct : 0)}<span class="val">${c ? Math.round(c.pct) + '%' : '–'}</span><span class="reset">${
-        c ? `${fmtTokens(c.tokens)} / ${fmtTokens(c.window)}` : ''
-      }</span></div></div>`;
+      ctx += `<div class="dsec ctx-item"><div class="head"><span class="name ellipsis">${esc(paneTitle(p))}</span><span class="val">${
+        c ? Math.round(c.pct) + '%' : '–'
+      }</span></div>${bar(c ? c.pct : 0)}<div class="reset">${c ? `${fmtTokens(c.tokens)} / ${fmtTokens(c.window)}` : ''}</div></div>`;
     }
   }
   $('#dashContext').innerHTML = ctx || `<div class="sub">${esc(t('dash.noOpen'))}</div>`;
@@ -1164,7 +1158,6 @@ async function boot() {
   S.lang = init.settings.lang || detectLang();
   applyTheme();
   applyLang();
-  $('#langBtn').onclick = () => setLang(S.lang === 'en' ? 'zh-Hant' : 'en');
 
   $('#projectBtn').onclick = (e) => {
     e.stopPropagation();
@@ -1191,6 +1184,12 @@ async function boot() {
   $('#newClaude').onclick = () => newSession('claude');
   $('#newCodex').onclick = () => newSession('codex');
   $('#newShell').onclick = () => newSession('shell');
+  $('#refreshList').onclick = async () => {
+    const btn = $('#refreshList');
+    btn.classList.add('spinning');
+    await refreshSessions();
+    setTimeout(() => btn.classList.remove('spinning'), 400);
+  };
   $('#search').oninput = (e) => {
     S.search = e.target.value;
     renderSessionList();

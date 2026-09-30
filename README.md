@@ -18,9 +18,9 @@
 - 多個 Claude 帳號。每個帳號是一個 `CLAUDE_CONFIG_DIR`，session 歷史共用，所以可以換帳號 `--resume` 同一個 session。
 - 額度用完時提供接手選項：換另一個 Claude 帳號續跑，或產生交接文件交給 Codex。
 - 五種主題（Terminal、Graphite、Sand、Mono、Paper），整個介面使用系統終端機的等寬字型。Claude 與 Codex 標籤用它們原本的品牌色。
-- 英文與繁體中文介面，右上角一鍵切換。
+- 英文與繁體中文介面，在儀表板的「外觀」切換。
 
-![Sand 主題，繁體中文介面](docs/screenshots/sand-zh.png)
+![繁體中文介面](docs/screenshots/terminal-zh.png)
 
 ## 安裝
 
@@ -61,7 +61,7 @@ npm install
 | 動作 | 方式 |
 | --- | --- |
 | 開專案 | 左上角的專案按鈕 |
-| 開舊 session | 點左側清單。已開的會聚焦到該窗格 |
+| 開舊 session | 點左側清單。已開的會聚焦到該窗格。`↻` 重新讀取 session 歷史 |
 | 新 session | `+ Claude` 或 `+ Codex`，可以先取名 |
 | 純終端機 | `+ PowerShell`（macOS、Linux 顯示為 `+ Shell`），在專案資料夾開一個一般的終端機。Windows 有裝 PowerShell 7 就用 `pwsh`，否則用內建的 Windows PowerShell。會跟著版面一起還原，也使用目前帳號的設定，所以在裡面打 `claude` 會用同一個帳號 |
 | 改名 | 雙擊窗格標題，或在清單上按右鍵 |
@@ -71,6 +71,7 @@ npm install
 | 換帳號續跑、交給 Codex 或 Claude | 窗格右上 `⇄` |
 | 登入、新增、切換帳號 | 右上角帳號選單 |
 | 主題、字級、字型、語言 | 儀表板的「外觀」 |
+| 窗格按鈕 | 滑鼠移到窗格上，或窗格是目前焦點時才會出現 |
 
 關閉窗格只會結束程式，session 紀錄留在硬碟上，隨時可以從清單再開。
 

@@ -14,7 +14,6 @@
       <div class="spacer"></div>
       <div id="meters" class="meters"></div>
       <button id="dashBtn" class="ghost" data-i18n="top.dashboard"></button>
-      <button id="langBtn" class="ghost lang-btn"></button>
       <button id="accountBtn" class="account-btn"><span class="avatar" id="accountAvatar"></span><span id="accountName"></span><span class="caret">▾</span></button>
     </header>
 
@@ -29,6 +28,7 @@
         <div class="tabs">
           <button class="tab active" data-tab="claude">Claude <span id="countClaude"></span></button>
           <button class="tab" data-tab="codex">Codex <span id="countCodex"></span></button>
+          <button id="refreshList" class="icon refresh-btn" data-i18n-title="side.refresh">↻</button>
         </div>
         <ul id="sessionList" class="session-list"></ul>
         <div class="side-foot" id="paneCount"></div>

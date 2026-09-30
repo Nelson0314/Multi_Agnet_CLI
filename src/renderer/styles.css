@@ -16,8 +16,13 @@
   --sel: #383838;
   --font: ui-monospace, 'SF Mono', Menlo, Consolas, 'Cascadia Mono', 'DejaVu Sans Mono', 'PingFang TC', 'Microsoft JhengHei', monospace;
   --radius: 3px;
+  /* 三層字級：主要（窗格標題、清單名稱、儀表板數字）、一般（按鈕、設定）、次要（時間、說明） */
+  --fs-1: 15px;
+  --fs-name: 13px;
+  --fs-2: 12px;
+  --fs-3: 11px;
   font-family: var(--font);
-  font-size: 12px;
+  font-size: var(--fs-2);
   color: var(--text);
 }
 
@@ -44,7 +49,7 @@ button {
   background: transparent;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 3px 9px;
+  padding: 4px 8px;
   cursor: pointer;
 }
 button:hover {
@@ -62,7 +67,7 @@ button.ghost:hover {
   border-color: var(--line);
 }
 button.icon {
-  padding: 1px 6px;
+  padding: 1px 8px;
   border-color: transparent;
   color: var(--muted);
 }
@@ -74,7 +79,7 @@ select {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 4px 7px;
+  padding: 4px 8px;
   outline: none;
 }
 input:focus,
@@ -83,11 +88,11 @@ select:focus {
 }
 .caret {
   color: var(--faint);
-  margin-left: 6px;
+  margin-left: 8px;
 }
 .sub {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-3);
 }
 .ellipsis {
   overflow: hidden;
@@ -97,23 +102,26 @@ select:focus {
 
 /* ---------- top bar ---------- */
 #topbar {
-  height: 38px;
+  height: 40px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 7px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  gap: 8px;
   color: var(--muted);
 }
 .brand img {
   width: 18px;
   height: 18px;
+  flex-shrink: 0;
 }
 .spacer {
   flex: 1;
@@ -124,13 +132,10 @@ select:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lang-btn {
-  min-width: 34px;
-}
 .account-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 320px;
   overflow: hidden;
   white-space: nowrap;
@@ -159,7 +164,7 @@ select:focus {
 .meter {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
@@ -190,7 +195,7 @@ select:focus {
 /* 標籤用文字顏色與細框表示，不用色塊 */
 .tag {
   font-size: 10px;
-  padding: 0 5px;
+  padding: 0 4px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   color: var(--muted);
@@ -216,14 +221,14 @@ select:focus {
 /* ---------- layout ---------- */
 #layout {
   display: flex;
-  height: calc(100% - 38px);
+  height: calc(100% - 40px);
 }
 #sidebar {
-  width: 220px;
+  width: 200px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 8px;
   background: var(--panel);
   border-right: 1px solid var(--line);
@@ -231,7 +236,7 @@ select:focus {
 .side-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .side-actions .shell-btn {
   flex-basis: 100%;
@@ -256,6 +261,18 @@ select:focus {
   background: transparent;
   color: var(--text);
 }
+.refresh-btn {
+  flex: 0 0 auto;
+  align-self: center;
+}
+.refresh-btn.spinning {
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .tab.active {
   color: var(--text);
   border-bottom-color: var(--text);
@@ -268,7 +285,7 @@ select:focus {
   flex: 1;
 }
 .session-list li {
-  padding: 6px 7px;
+  padding: 8px 8px;
   border-radius: var(--radius);
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -287,8 +304,10 @@ select:focus {
 }
 .session-list .s-title {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
+  font-size: var(--fs-name);
+  font-weight: 600;
 }
 .session-list .s-title span:first-child {
   overflow: hidden;
@@ -296,21 +315,23 @@ select:focus {
   white-space: nowrap;
   flex: 1;
 }
-.session-list .s-meta,
-.session-list .s-prompt {
-  color: var(--muted);
-  font-size: 11px;
-  margin-top: 2px;
+.session-list li:not(.open) .s-title {
+  color: color-mix(in srgb, var(--text) 85%, var(--muted));
 }
 .session-list .s-meta {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--fs-3);
 }
-.session-list .s-prompt {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.session-list .s-meta .sep {
   color: var(--faint);
+}
+.session-list .s-meta .bar {
+  width: 56px;
+  height: 3px;
 }
 .dot {
   width: 6px;
@@ -366,14 +387,14 @@ select:focus {
 .recent-list {
   list-style: none;
   padding: 0;
-  margin-top: 18px;
+  margin-top: 16px;
   width: min(520px, 100%);
 }
 .recent-list li {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: baseline;
-  padding: 6px 10px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   cursor: pointer;
   text-align: left;
@@ -403,34 +424,29 @@ select:focus {
   grid-row: 1 / -1 !important;
 }
 .pane-head {
-  padding: 4px 8px 5px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  border-top: 1px solid transparent;
-}
-.pane.focused .pane-head {
-  border-top-color: var(--muted);
-  background: var(--panel-2);
-}
-.pane-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  height: 32px;
+  padding: 0 4px 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
-.pane-row > * {
+.pane-head > * {
   flex-shrink: 0;
 }
-.pane-row.meta {
-  margin-top: 2px;
-  padding-left: 16px;
+.pane.focused .pane-head {
+  background: var(--panel-2);
 }
 .pane-idx {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--fs-3);
 }
 .pane-title {
-  font-size: 13px;
+  font-size: var(--fs-1);
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -438,34 +454,51 @@ select:focus {
   min-width: 0;
   cursor: text;
 }
-.pane.focused .pane-title {
-  color: var(--text);
-}
 .pane:not(.focused) .pane-title {
-  color: color-mix(in srgb, var(--text) 80%, var(--muted));
+  color: color-mix(in srgb, var(--text) 75%, var(--muted));
+  font-weight: 400;
 }
 .pane-title input {
   width: 100%;
-  font-size: 13px;
-  padding: 1px 4px;
+  font-size: var(--fs-1);
+  padding: 0 4px;
 }
 .ctx {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
+  font-size: var(--fs-3);
+  min-width: 28px;
+  text-align: right;
 }
-.ctx .bar {
-  width: 80px;
+/* context 進度線：貼在標題列底邊，佔滿整個窗格寬度 */
+.ctx-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+}
+.ctx-line[hidden] {
+  display: none;
+}
+.ctx-line > i {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+  transition: width 0.4s;
+}
+.ctx-line.warn > i {
+  background: var(--warn);
+}
+.ctx-line.bad > i {
+  background: var(--bad);
 }
 .pane-banner {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
+  gap: 8px;
+  padding: 4px 8px;
   background: color-mix(in srgb, var(--bad) 12%, var(--panel));
   border-bottom: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
   font-size: 11px;
@@ -482,7 +515,7 @@ select:focus {
   overflow: hidden;
   flex: 1;
   min-height: 0;
-  padding: 4px 0 0 6px;
+  padding: 4px 0 0 8px;
 }
 .pane.exited .term {
   opacity: 0.55;
@@ -497,71 +530,91 @@ select:focus {
   width: 260px;
   flex-shrink: 0;
   overflow-y: auto;
-  padding: 6px 10px 12px;
+  padding: 8px 12px 16px;
   background: var(--panel);
   border-left: 1px solid var(--line);
 }
 #dashboard h3 {
-  font-size: 11px;
+  font-size: var(--fs-3);
   font-weight: 400;
   color: var(--faint);
-  margin: 14px 0 6px;
+  margin: 16px 0 8px;
 }
 #dashboard h3::before {
   content: '# ';
 }
-.card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 6px 8px;
-  margin-bottom: 6px;
+/* 儀表板不用卡片外框，靠留白分區 */
+.dsec {
+  margin-bottom: 16px;
 }
-.card .row {
+.dsec .head {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 3px 0;
-  font-size: 11px;
-}
-.card .row .label {
-  width: 52px;
-  color: var(--muted);
-}
-.card .row .bar {
-  flex: 1;
-}
-.card .row .val {
-  width: 32px;
-  text-align: right;
-}
-.card .row .reset {
-  color: var(--faint);
-  font-size: 10px;
-  width: 64px;
-  text-align: right;
-  line-height: 1.2;
-}
-.card .head {
-  display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   min-width: 0;
+  margin-bottom: 4px;
+}
+.dsec .name {
+  font-size: var(--fs-name);
+  font-weight: 600;
+  min-width: 0;
+}
+.dsec .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.dsec .row .label {
+  width: 56px;
+  color: var(--muted);
+  font-size: var(--fs-3);
+}
+.dsec .row .bar {
+  flex: 1;
+}
+.dsec .val {
+  font-size: var(--fs-1);
+  font-weight: 600;
+  min-width: 44px;
+  text-align: right;
+}
+.dsec .reset {
+  color: var(--faint);
+  font-size: var(--fs-3);
+  text-align: right;
+}
+.dsec .sub {
+  margin-top: 4px;
+}
+.ctx-item {
+  margin-bottom: 12px;
+}
+.ctx-item .head {
+  justify-content: space-between;
+}
+.ctx-item .name {
+  font-weight: 400;
+  flex: 1;
+}
+.ctx-item > .bar {
+  width: 100%;
 }
 .sub.group {
-  margin: 6px 0;
+  margin: 8px 0;
 }
 .settings label {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  margin: 5px 0;
+  gap: 8px;
+  margin: 4px 0;
   color: var(--muted);
 }
 .settings select,
 .settings input:not([type='checkbox']) {
   width: 130px;
-  padding: 2px 5px;
+  padding: 2px 4px;
 }
 input[type='checkbox'] {
   accent-color: var(--muted);
@@ -582,7 +635,7 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 8px 8px;
   border-radius: var(--radius);
   cursor: pointer;
 }
@@ -623,7 +676,7 @@ input[type='checkbox'] {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 10px 0;
+  margin: 12px 0;
 }
 .modal-card .field.check {
   flex-direction: row;
@@ -642,26 +695,26 @@ input[type='checkbox'] {
 }
 .login-term {
   height: 260px;
-  margin-top: 10px;
+  margin-top: 12px;
   padding: 4px;
   border: 1px solid var(--line);
   background: var(--bg);
 }
 .toasts {
   position: fixed;
-  right: 14px;
-  bottom: 14px;
+  right: 16px;
+  bottom: 16px;
   z-index: 70;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .toast {
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-left: 2px solid var(--muted);
   border-radius: var(--radius);
-  padding: 8px 10px;
+  padding: 8px 12px;
   max-width: 380px;
   white-space: pre-wrap;
   line-height: 1.5;
@@ -674,4 +727,15 @@ input[type='checkbox'] {
 }
 .pane-banner button {
   border-color: var(--line-strong);
+}
+/* 窗格按鈕平常隱藏：滑鼠移到窗格上或它是目前窗格時才出現；保留位置，標題不會跳動 */
+.pane-head button.icon {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.pane:hover .pane-head button.icon,
+.pane.focused .pane-head button.icon {
+  opacity: 1;
+  pointer-events: auto;
 }

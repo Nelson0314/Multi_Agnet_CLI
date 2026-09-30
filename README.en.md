@@ -18,7 +18,7 @@ If you keep several Claude Code sessions open on one project, every reboot means
 - Multiple Claude accounts. Each one is a `CLAUDE_CONFIG_DIR` with shared session history, so another account can `--resume` the same session.
 - When usage runs out, the pane offers to resume on another Claude account or to hand the work to Codex with a handoff file.
 - Five themes (Terminal, Graphite, Sand, Mono, Paper). The whole UI uses your system's terminal font, and the Claude and Codex labels keep their brand colors.
-- English and Traditional Chinese UI, switchable from the top bar.
+- English and Traditional Chinese UI, switchable in Dashboard, Appearance.
 
 ## Install
 
@@ -59,7 +59,7 @@ Platform notes:
 | Action | How |
 | --- | --- |
 | Open a project | Project button, top left |
-| Open a past session | Click it in the sidebar. An open one gets focused instead |
+| Open a past session | Click it in the sidebar. An open one gets focused instead. `↻` reloads the history |
 | New session | `+ Claude` or `+ Codex`, optionally with a name |
 | Plain terminal | `+ PowerShell` (`+ Shell` on macOS and Linux) opens a normal terminal in the project folder. Windows uses `pwsh` when PowerShell 7 is installed, otherwise Windows PowerShell. It is restored with the layout and carries the active account's settings, so `claude` typed there uses the same account |
 | Rename | Double-click the pane title, or right-click in the list |
@@ -69,6 +69,7 @@ Platform notes:
 | Resume on another account, hand off | `⇄` on the pane |
 | Sign in, add or switch accounts | Account menu, top right |
 | Theme, font size, font, language | Dashboard, Appearance |
+| Pane buttons | Shown when the mouse is over a pane or the pane has focus |
 
 Closing a pane ends the process. The session stays on disk and can be reopened from the list.
 
