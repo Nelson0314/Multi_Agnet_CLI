@@ -10,7 +10,7 @@ const MCP = path.join(__dirname, '..', 'src', 'bridge', 'mcp.js');
 
 // 用 stdio 跟 MCP server 對話
 function mcpClient(env) {
-  const child = spawn(process.execPath, [MCP], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(process.execPath, [MCP], { env: { ...process.env, MULTI_AGENT_ENDPOINT_FILE: path.join(tmpdir(), 'none.json'), ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
   let buf = '';
   const waiting = new Map();
   child.stdout.on('data', (d) => {
@@ -84,6 +84,7 @@ test('bridge 端對端：list、送訊息（bracketed paste）、讀回覆、次
         : null,
     settings: () => ({ bridgeConfirm: confirm }),
     transcriptFile: () => transcript,
+    enterDelay: 20,
   });
   await bridge.start();
   const c = mcpClient(bridge.envFor('A'));
@@ -118,4 +119,45 @@ test('bridge 端對端：list、送訊息（bracketed paste）、讀回覆、次
   bad.close();
   c.close();
   bridge.stop();
+});
+
+test('環境變數過期時改讀 endpoint.json，並由呼叫端 CLI 推出是哪個窗格', async () => {
+  const dir = tmpdir();
+  const writes = [];
+  const panes = new Map([
+    ['A', { kind: 'claude', cwd: '/p' }],
+    ['B', { kind: 'codex', cwd: '/p' }],
+  ]);
+  const bridge = new Bridge({
+    ptys: { write: (id, d) => writes.push([id, d]), waitQuiet: async () => {} },
+    panes,
+    askRenderer: async () => [
+      { index: 1, paneId: 'A', kind: 'Claude', title: 'main' },
+      { index: 2, paneId: 'B', kind: 'Codex', title: 'review' },
+    ],
+    settings: () => ({ bridgeConfirm: false }),
+    transcriptFile: () => null,
+    enterDelay: 20,
+  });
+  await bridge.start();
+  const file = path.join(dir, 'endpoint.json');
+  const { MULTI_AGENT_BRIDGE: url, MULTI_AGENT_TOKEN: token } = bridge.envFor('');
+  require('fs').writeFileSync(file, JSON.stringify({ url, token }));
+  // 舊的 port、舊的 token、舊的窗格 id：像是 Codex 背景服務留下來的
+  const c = mcpClient({ MULTI_AGENT_BRIDGE: 'http://127.0.0.1:9', MULTI_AGENT_TOKEN: 'old', MULTI_AGENT_PANE_ID: 'gone', MULTI_AGENT_ENDPOINT_FILE: file });
+  await c.call('initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'codex-mcp-client', version: '1' } });
+  const r = await c.call('tools/call', { name: 'send_to_pane', arguments: { pane: 1, message: 'done' } });
+  assert.strictEqual(r.result.isError, undefined, r.result.content[0].text);
+  assert.strictEqual(writes[0][0], 'A');
+  assert.match(writes[0][1], /\[from pane 2 · Codex · review\]/);
+  assert.deepStrictEqual(writes[1], ['A', '\r']);
+  c.close();
+  bridge.stop();
+});
+
+test('endpointFile 對應 Electron 的 userData 位置', () => {
+  const { endpointFile } = require('../src/bridge/mcp');
+  assert.match(endpointFile({ APPDATA: 'C:\\Users\\u\\AppData\\Roaming' }, 'win32'), /Roaming[\\/]multi-agent-cli[\\/]bridge[\\/]endpoint\.json$/);
+  assert.match(endpointFile({}, 'darwin'), /Library\/Application Support\/multi-agent-cli\/bridge\/endpoint\.json$/);
+  assert.match(endpointFile({ XDG_CONFIG_HOME: '/x' }, 'linux'), /^\/x\/multi-agent-cli\/bridge\/endpoint\.json$/);
 });

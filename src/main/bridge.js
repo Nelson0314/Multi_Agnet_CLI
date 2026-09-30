@@ -54,6 +54,10 @@ function codexLastReply(entries) {
 }
 
 // ---------------------------------------------------------------- 伺服器
+const ENTER_DELAY = 300;
+const CODEX_ENTER_DELAY = 900;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 class Bridge {
   /**
    * @param {{ ptys, panes: Map, askRenderer: (method:string, args:any)=>Promise<any>,
@@ -108,11 +112,21 @@ class Bridge {
       const want = Buffer.from(this.token);
       if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return reply(403, { error: 'bad token' });
       try {
-        reply(200, { result: await this.call(body.method, body.params || {}, body.from) });
+        reply(200, { result: await this.call(body.method, body.params || {}, this.resolveFrom(body.from, body.client)) });
       } catch (e) {
         reply(200, { error: e.message });
       }
     });
+  }
+
+  // 窗格 id 對不上時（MCP server 拿到舊的環境變數），用呼叫端是哪個 CLI 來推：
+  // 只有一個同類窗格開著時就是它
+  resolveFrom(fromId, client) {
+    if (this.panes.has(fromId)) return fromId;
+    const kind = /codex/i.test(client || '') ? 'codex' : /claude/i.test(client || '') ? 'claude' : null;
+    if (!kind) return fromId;
+    const same = [...this.panes].filter(([, p]) => p.kind === kind);
+    return same.length === 1 ? same[0][0] : fromId;
   }
 
   async call(method, params, fromId) {
@@ -163,7 +177,12 @@ class Bridge {
     const confirm = this.settings().bridgeConfirm !== false;
     if (!confirm) await this.ptys.waitQuiet(target.paneId, 2000, 30_000);
     this.ptys.write(target.paneId, paste);
-    if (!confirm) setTimeout(() => this.ptys.write(target.paneId, '\r'), 150);
+    // Codex 會把貼上後很快出現的 Enter 當成貼上內容的一部分（換行），
+    // 所以等輸入框處理完貼上再按 Enter
+    if (!confirm) {
+      await sleep(this.enterDelay ?? (target.kind === 'codex' ? CODEX_ENTER_DELAY : ENTER_DELAY));
+      this.ptys.write(target.paneId, '\r');
+    }
     this.askRenderer('incoming', { paneId: target.paneId, fromIndex: me.index, fromTitle: me.title, confirm }).catch(() => {});
     return confirm
       ? `Placed in pane ${target.index}'s input box. The user will press Enter to send it. Use wait_for_reply to get the answer.`

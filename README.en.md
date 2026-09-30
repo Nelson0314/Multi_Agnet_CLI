@@ -124,6 +124,7 @@ For example, tell the Claude pane "ask the Codex in pane 3 to review src/api.ts 
 
 - Messages start with their source, such as `[from pane 2 · Claude · API refactor]`.
 - Messages are sent directly after the target has been quiet for 2 seconds. Turn on "Confirm pane messages" to have them wait in the target's input until you press Enter.
+- Codex panes start with `codex --no-daemon` when the installed Codex has that flag. Newer Codex versions otherwise run the conversation on a shared background server, whose tools cannot reach the pane and report "not reachable".
 - At most 12 messages between the same two panes in 10 minutes, so two agents cannot loop forever.
 - The server listens on localhost only, and its token is given only to panes opened by the app.
 

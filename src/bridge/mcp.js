@@ -3,8 +3,37 @@
 // Multi-Agent CLI 的 MCP server（stdio，JSON-RPC 2.0，一行一則訊息）。
 // Claude Code 與 Codex 都可以掛上它，用來跟同一個視窗裡的其他窗格對話。
 // 它透過窗格注入的環境變數（MULTI_AGENT_BRIDGE / TOKEN / PANE_ID）連回主程式。
+// 環境變數過期時（例如由 Codex 的共用背景服務啟動，拿到的是舊的連線資訊），
+// 改讀主程式寫在固定位置的 endpoint.json。
 const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const readline = require('readline');
+
+// 跟 main.js 的 app.getPath('userData') 對應
+function endpointFile(env = process.env, platform = process.platform) {
+  if (env.MULTI_AGENT_ENDPOINT_FILE) return env.MULTI_AGENT_ENDPOINT_FILE;
+  const home = os.homedir();
+  const base =
+    platform === 'win32'
+      ? env.APPDATA || path.join(home, 'AppData', 'Roaming')
+      : platform === 'darwin'
+        ? path.join(home, 'Library', 'Application Support')
+        : env.XDG_CONFIG_HOME || path.join(home, '.config');
+  return path.join(base, 'multi-agent-cli', 'bridge', 'endpoint.json');
+}
+
+function readEndpoint() {
+  try {
+    const j = JSON.parse(fs.readFileSync(endpointFile(), 'utf8'));
+    return j && j.url && j.token ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+let clientName = '';
 
 const VERSION = require('../../package.json').version;
 
@@ -53,10 +82,10 @@ const TOOLS = [
   },
 ];
 
-function rpc(method, params) {
-  const base = process.env.MULTI_AGENT_BRIDGE;
-  if (!base) return Promise.reject(new Error('Not running inside a Multi-Agent CLI pane, so there are no other panes to talk to.'));
-  const body = JSON.stringify({ token: process.env.MULTI_AGENT_TOKEN, from: process.env.MULTI_AGENT_PANE_ID, method, params });
+const UNREACHABLE = 'Multi-Agent CLI is not reachable. Is the app still open?';
+
+function post(base, token, method, params) {
+  const body = JSON.stringify({ token, from: process.env.MULTI_AGENT_PANE_ID, client: clientName, method, params });
   return new Promise((resolve, reject) => {
     const req = http.request(`${base}/rpc`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, (res) => {
       let raw = '';
@@ -64,15 +93,34 @@ function rpc(method, params) {
       res.on('end', () => {
         try {
           const j = JSON.parse(raw);
-          j.error ? reject(new Error(j.error)) : resolve(j.result);
+          j.error ? reject(Object.assign(new Error(j.error), { status: res.statusCode })) : resolve(j.result);
         } catch (e) {
           reject(e);
         }
       });
     });
-    req.on('error', () => reject(new Error('Multi-Agent CLI is not reachable. Is the app still open?')));
+    req.on('error', () => reject(Object.assign(new Error(UNREACHABLE), { unreachable: true })));
     req.end(body);
   });
+}
+
+async function rpc(method, params) {
+  const base = process.env.MULTI_AGENT_BRIDGE;
+  const token = process.env.MULTI_AGENT_TOKEN;
+  if (base) {
+    try {
+      return await post(base, token, method, params);
+    } catch (e) {
+      // 連不到或 token 不對：可能是舊的連線資訊，改用 endpoint.json 再試一次
+      if (!e.unreachable && e.status !== 403) throw e;
+      const ep = readEndpoint();
+      if (!ep || (ep.url === base && ep.token === token)) throw e;
+      return post(ep.url, ep.token, method, params);
+    }
+  }
+  const ep = readEndpoint();
+  if (!ep) throw new Error('Not running inside a Multi-Agent CLI pane, so there are no other panes to talk to.');
+  return post(ep.url, ep.token, method, params);
 }
 
 function send(msg) {
@@ -85,6 +133,7 @@ async function handle(msg) {
   try {
     let result;
     if (method === 'initialize') {
+      clientName = String((params && params.clientInfo && params.clientInfo.name) || '');
       result = {
         protocolVersion: (params && params.protocolVersion) || '2025-06-18',
         capabilities: { tools: {} },
@@ -124,4 +173,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { TOOLS, handle };
+module.exports = { TOOLS, handle, endpointFile };

@@ -121,6 +121,20 @@ function spawnArgs({ kind, sessionId, name, prompt }) {
   throw new Error(`unknown pane kind ${kind}`);
 }
 
+// 舊版 Codex 沒有 --no-daemon，傳了會直接報錯，所以先看 --help 有沒有這個選項
+let noDaemonCheck = null;
+function codexNoDaemon() {
+  if (!noDaemonCheck) {
+    noDaemonCheck = new Promise((resolve) => {
+      const { file, args } = commandFor('codex', ['--help'], { interactive: false });
+      execFile(file, args, { timeout: 15000, windowsHide: true, maxBuffer: 4 << 20 }, (_err, out, errOut) => {
+        resolve(/--no-daemon\b/.test(`${out}${errOut}`));
+      });
+    });
+  }
+  return noDaemonCheck;
+}
+
 // ---------------------------------------------------------------- Claude 窗格的自動設定
 // 每個 Claude 窗格啟動時自動帶上：
 //   --mcp-config：multi-agent 工具（跟其他窗格對話），連線資訊直接寫在設定裡，不依賴環境變數傳遞
@@ -289,7 +303,7 @@ function registerIpc() {
     return { claude: claudeSessions.listSessions(cwd, claudeRoot(active)).map(withName), codex: codexList };
   });
 
-  ipcMain.handle('pane:spawn', (_e, opts) => {
+  ipcMain.handle('pane:spawn', async (_e, opts) => {
     // 上限以「每個專案」計算：不同專案的 workspace 可以同時在背景跑
     const inGrid = (k) => k === 'claude' || k === 'codex' || k === 'shell';
     const running = [...panes.values()].filter((p) => p.cwd === opts.cwd && inGrid(p.kind)).length;
@@ -298,7 +312,11 @@ function registerIpc() {
     const spec = spawnArgs(opts);
     const { cmd, sessionId, raw } = spec;
     const paneId = crypto.randomUUID();
-    const args = opts.kind === 'claude' ? [...claudePaneArgs(paneId), ...spec.args] : spec.args;
+    let args = spec.args;
+    if (opts.kind === 'claude') args = [...claudePaneArgs(paneId), ...args];
+    // 新版 Codex 預設把對話交給共用的背景服務跑，MCP 工具也由它啟動，
+    // 拿到的是該服務啟動時的環境變數，連不回這個窗格。窗格自己跑就沒這個問題。
+    if (opts.kind === 'codex' && (await codexNoDaemon())) args = ['--no-daemon', ...args];
     const cwd = opts.cwd;
     panes.set(paneId, { kind: opts.kind, cwd, sessionId, profileId: profile.id });
     if (opts.name && sessionId) {
@@ -501,7 +519,22 @@ app.whenReady().then(() => {
         : claudeSessions.sessionFile(pane.cwd, pane.sessionId, claudeRoot(profile));
     },
   });
-  bridge.start();
+  codexNoDaemon();
+  // MCP server 的環境變數過期時，改從這個固定位置讀目前的連線資訊
+  const endpoint = path.join(BRIDGE_DIR(), 'endpoint.json');
+  bridge.start().then(() => {
+    try {
+      fs.mkdirSync(BRIDGE_DIR(), { recursive: true });
+      const { MULTI_AGENT_BRIDGE: url, MULTI_AGENT_TOKEN: token } = bridge.envFor('');
+      fs.writeFileSync(endpoint, JSON.stringify({ url, token, pid: process.pid }), { mode: 0o600 });
+    } catch {}
+  });
+  app.on('will-quit', () => {
+    try {
+      const j = JSON.parse(fs.readFileSync(endpoint, 'utf8'));
+      if (j.pid === process.pid) fs.unlinkSync(endpoint);
+    } catch {}
+  });
   setInterval(flushTitles, 3000);
   registerIpc();
   createWindow();
