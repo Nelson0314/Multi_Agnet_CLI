@@ -368,21 +368,144 @@ function bestGrid(n, W, H) {
   return best;
 }
 
+// 版面由「列」組成，每列有幾個窗格（由 bestGrid 決定）。大小以比例記錄：
+//   w.rowW[r]：第 r 列的高度比例；w.colW[r][c]：第 r 列第 c 格的寬度比例
+// 用 flex-grow 套用比例，所以縮放視窗時永遠填滿、比例不變。
+const MIN_W = 160; // 窗格最小寬度（px）
+const MIN_H = 90; // 窗格最小高度（px）
+const equal = (n) => Array.from({ length: n }, () => 1 / n);
+
 function layoutGrid(w) {
   const n = w.panes.length;
   const host = $('#workspaces');
   if (n) {
     const { cols, rows, last } = bestGrid(n, host.clientWidth || 1600, host.clientHeight || 900);
-    const L = (cols * last) / gcd(cols, last); // 欄數取最小公倍數，讓整列與最後一列都能平均分
-    w.el.style.gridTemplateColumns = `repeat(${L}, minmax(0, 1fr))`;
-    w.el.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-    w.panes.forEach((p, i) => {
-      p.el.style.gridColumn = `span ${i < n - last ? L / cols : L / last}`;
-    });
+    const counts = Array.from({ length: rows }, (_, r) => (r < rows - 1 ? cols : last));
+    const sig = counts.join(',');
+    const order = w.panes.map((p) => p.el.dataset.uid).join(',');
+    // 窗格數量或排法改變：重建列結構；有存過同樣排法的大小就沿用，否則平均分配
+    if (w.sig !== sig) {
+      w.sig = sig;
+      const saved = w.savedSizes && w.savedSizes.sig === sig ? w.savedSizes : null;
+      w.rowW = saved ? saved.rowW.slice() : equal(rows);
+      w.colW = saved ? saved.colW.map((r) => r.slice()) : counts.map((k) => equal(k));
+    }
+    if (w.builtSig !== sig || w.builtOrder !== order) buildRows(w, counts);
+    applySizes(w);
+  } else {
+    w.el.innerHTML = '';
+    w.sig = w.builtSig = w.builtOrder = null;
   }
   w.panes.forEach((p, i) => ($('.pane-idx', p.el).textContent = `${i + 1}`));
   $('#empty').hidden = !!S.cwd;
   $('#paneCount').textContent = t('side.open', { n, max: S.maxPanes });
+}
+
+function buildRows(w, counts) {
+  const frag = document.createDocumentFragment();
+  w.rowEls = [];
+  let i = 0;
+  counts.forEach((k, r) => {
+    if (r > 0) frag.appendChild(makeSplitter(w, 'h', r - 1));
+    const row = document.createElement('div');
+    row.className = 'ws-row';
+    for (let c = 0; c < k; c++) {
+      if (c > 0) row.appendChild(makeSplitter(w, 'v', r, c - 1));
+      row.appendChild(w.panes[i++].el); // 移動既有的窗格元素，終端機不會重建
+    }
+    w.rowEls.push(row);
+    frag.appendChild(row);
+  });
+  w.el.innerHTML = '';
+  w.el.appendChild(frag);
+  w.builtSig = counts.join(',');
+  w.builtOrder = w.panes.map((p) => p.el.dataset.uid).join(',');
+}
+
+// 視窗縮小時，把低於最小尺寸的窗格補回最小值，從其他較大的窗格扣
+function enforceMin(weights, totalPx, minPx) {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const min = Math.min((minPx / Math.max(1, totalPx)) * sum, sum / weights.length);
+  let deficit = 0;
+  for (let k = 0; k < weights.length; k++) {
+    if (weights[k] < min) {
+      deficit += min - weights[k];
+      weights[k] = min;
+    }
+  }
+  while (deficit > 1e-9) {
+    const extra = weights.map((x) => Math.max(0, x - min));
+    const room = extra.reduce((a, b) => a + b, 0);
+    if (room <= 1e-9) break;
+    const take = Math.min(deficit, room);
+    for (let k = 0; k < weights.length; k++) weights[k] -= (extra[k] / room) * take;
+    deficit -= take;
+  }
+}
+
+function applySizes(w) {
+  const W = w.el.clientWidth;
+  const H = w.el.clientHeight;
+  if (W && H) {
+    enforceMin(w.rowW, H, MIN_H);
+    w.colW.forEach((row) => enforceMin(row, W, MIN_W));
+  }
+  let i = 0;
+  w.rowEls.forEach((row, r) => {
+    row.style.flex = `${w.rowW[r]} 1 0px`;
+    w.colW[r].forEach((cw) => (w.panes[i++].el.style.flex = `${cw} 1 0px`));
+  });
+}
+
+// 分隔線：'v' 調整同一列左右兩格，'h' 調整上下兩列；雙擊回到平均
+function makeSplitter(w, dir, r, c) {
+  const el = document.createElement('div');
+  el.className = `splitter ${dir}`;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    const weights = dir === 'v' ? w.colW[r] : w.rowW;
+    const idx = dir === 'v' ? c : r;
+    const total = dir === 'v' ? w.rowEls[r].clientWidth : w.el.clientHeight;
+    const sum = weights.reduce((a, b) => a + b, 0);
+    const start = dir === 'v' ? e.clientX : e.clientY;
+    const a0 = weights[idx];
+    const b0 = weights[idx + 1];
+    const min = ((dir === 'v' ? MIN_W : MIN_H) / Math.max(1, total)) * sum;
+    document.body.classList.add(`resizing-${dir}`);
+    el.classList.add('active');
+    const move = (ev) => {
+      const d = (((dir === 'v' ? ev.clientX : ev.clientY) - start) / Math.max(1, total)) * sum;
+      const nd = Math.max(min - a0, Math.min(b0 - min, d));
+      weights[idx] = a0 + nd;
+      weights[idx + 1] = b0 - nd;
+      applySizes(w);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      document.body.classList.remove(`resizing-${dir}`);
+      el.classList.remove('active');
+      saveSizes(w);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  });
+  el.addEventListener('dblclick', () => {
+    if (dir === 'v') w.colW[r] = equal(w.colW[r].length);
+    else w.rowW = equal(w.rowW.length);
+    applySizes(w);
+    saveSizes(w);
+  });
+  return el;
+}
+
+function saveSizes(w) {
+  w.savedSizes = { sig: w.sig, rowW: w.rowW.slice(), colW: w.colW.map((r) => r.slice()) };
+  const cwd = [...S.workspaces].find(([, x]) => x === w)?.[0];
+  if (cwd) saveLayout(cwd);
 }
 
 function paneTitle(p) {
@@ -418,8 +541,10 @@ function renderPaneCtx(p) {
   $('i', line).style.width = `${c ? Math.min(100, c.pct) : 0}%`;
 }
 
+let paneUid = 0;
 function createPaneEl(p) {
   const el = document.createElement('div');
+  el.dataset.uid = String(++paneUid);
   el.innerHTML = `
     <div class="pane-head">
       <span class="pane-idx"></span>
@@ -583,6 +708,7 @@ function removePane(p) {
   p.term && p.term.dispose();
   p.el.remove();
   if (S.focused === p) S.focused = null;
+  w.builtOrder = null; // 強制重建列結構
   layoutGrid(w);
 }
 
@@ -608,6 +734,7 @@ function saveLayout(cwd) {
       ...(p.runCwd ? { runCwd: p.runCwd } : {}),
       ...(p.kind === 'shell' ? { name: p.name } : {}),
     })),
+    w.savedSizes || null,
   );
 }
 
@@ -740,6 +867,7 @@ async function openProject(cwd, { restore = true } = {}) {
   document.title = `${basename(cwd)} — Multi-Agent CLI`;
   const existed = S.workspaces.has(cwd);
   const w = workspaceFor(cwd);
+  if (!existed && info.sizes) w.savedSizes = info.sizes;
   for (const [k, x] of S.workspaces) x.el.hidden = k !== cwd;
   layoutGrid(w);
   await refreshSessions();

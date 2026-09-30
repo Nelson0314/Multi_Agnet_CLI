@@ -66,6 +66,7 @@ npm install
 | 純終端機 | `+ PowerShell`（macOS、Linux 顯示為 `+ Shell`），在專案資料夾開一個一般的終端機。Windows 有裝 PowerShell 7 就用 `pwsh`，否則用內建的 Windows PowerShell。會跟著版面一起還原，也使用目前帳號的設定，所以在裡面打 `claude` 會用同一個帳號 |
 | 改名 | 雙擊窗格標題，或在清單上按右鍵 |
 | 最大化 | 窗格右上 `⤢` |
+| 調整窗格大小 | 拖曳窗格之間的分隔線；直線調整左右、橫線調整上下，雙擊分隔線回到平均。大小依比例記錄，縮放視窗時照樣填滿，重開程式後沿用 |
 | 切換窗格 | `Ctrl/⌘ + 1…6` |
 | 側欄 | 預設收成一條細邊，只留一個 `›`；滑鼠移上去會浮出完整側欄。按 `‹` `›` 或 `Ctrl/⌘ + B` 固定展開或收起 |
 | 複製、貼上 | macOS 用 `⌘C` `⌘V`；Windows、Linux 用 `Ctrl+Shift+C` `Ctrl+Shift+V`。`Ctrl+V` 留給 Claude Code 貼圖片 |

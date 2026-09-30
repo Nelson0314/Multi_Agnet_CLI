@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   resize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
   resetLimit: (id) => ipcRenderer.send('pty:resetLimit', id),
   kill: (id) => ipcRenderer.invoke('pty:kill', id),
-  saveLayout: (cwd, panes) => ipcRenderer.invoke('layout:save', cwd, panes),
+  saveLayout: (cwd, panes, sizes) => ipcRenderer.invoke('layout:save', cwd, panes, sizes),
   setName: (cwd, sessionId, name, kind, profileId) => ipcRenderer.invoke('names:set', cwd, sessionId, name, kind, profileId),
   getContext: (items) => ipcRenderer.invoke('context:get', items),
   getUsage: (opts) => ipcRenderer.invoke('usage:get', opts),

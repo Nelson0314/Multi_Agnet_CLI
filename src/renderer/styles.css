@@ -388,13 +388,61 @@ select:focus {
   position: absolute;
   inset: 0;
   background: var(--bg); /* 明確背景：版面重排後縫隙會重繪，不殘留舊畫面 */
-  display: grid;
-  gap: 1px;
+  display: flex;
+  flex-direction: column;
+}
+.ws-row {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+/* 分隔線：畫面上 1px，可拖曳的範圍左右（或上下）各多 3px */
+.splitter {
+  position: relative;
+  flex: 0 0 1px;
+  background: var(--line);
+  z-index: 5;
+}
+.splitter::before {
+  content: '';
+  position: absolute;
+}
+.splitter.v {
+  cursor: col-resize;
+}
+.splitter.v::before {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+.splitter.h {
+  cursor: row-resize;
+}
+.splitter.h::before {
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+}
+.splitter:hover,
+.splitter.active {
+  background: var(--muted);
+}
+/* 拖曳時整個畫面維持調整游標，也避免終端機搶走滑鼠事件 */
+body.resizing-v,
+body.resizing-v * {
+  cursor: col-resize !important;
+}
+body.resizing-h,
+body.resizing-h * {
+  cursor: row-resize !important;
+}
+body.resizing-v .term,
+body.resizing-h .term {
+  pointer-events: none;
 }
 /* 有窗格時，1px 間隙露出分隔線顏色，像原生終端機的分割畫面 */
-.workspace:not(:empty) {
-  background: var(--line);
-}
 .workspace[hidden] {
   display: none;
 }
@@ -453,9 +501,13 @@ select:focus {
 .workspace.has-max .pane:not(.max) {
   display: none;
 }
+.workspace.has-max .splitter,
+.workspace.has-max .ws-row:not(:has(.pane.max)) {
+  display: none;
+}
+.workspace.has-max .ws-row:has(.pane.max),
 .workspace.has-max .pane.max {
-  grid-column: 1 / -1 !important;
-  grid-row: 1 / -1 !important;
+  flex: 1 1 0px !important;
 }
 .pane-head {
   position: relative;

@@ -275,7 +275,7 @@ function registerIpc() {
   ipcMain.handle('projects:open', (_e, cwd) => {
     store.touchProject(cwd);
     const p = store.project(cwd);
-    return { cwd, panes: p.panes, names: p.names };
+    return { cwd, panes: p.panes, names: p.names, sizes: p.sizes || null };
   });
 
   ipcMain.handle('sessions:list', (_e, cwd) => {
@@ -353,7 +353,8 @@ function registerIpc() {
     cleanupPaneFiles(id);
   });
 
-  ipcMain.handle('layout:save', (_e, cwd, list) => {
+  ipcMain.handle('layout:save', (_e, cwd, list, sizes) => {
+    if (sizes !== undefined) store.project(cwd).sizes = sizes;
     // PowerShell 窗格沒有 session id，只記下名稱，還原時開一個新的
     store.project(cwd).panes = list
       .filter((p) => (p.sessionId && (p.kind === 'claude' || p.kind === 'codex')) || p.kind === 'shell')

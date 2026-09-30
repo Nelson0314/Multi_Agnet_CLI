@@ -64,6 +64,7 @@ Platform notes:
 | Plain terminal | `+ PowerShell` (`+ Shell` on macOS and Linux) opens a normal terminal in the project folder. Windows uses `pwsh` when PowerShell 7 is installed, otherwise Windows PowerShell. It is restored with the layout and carries the active account's settings, so `claude` typed there uses the same account |
 | Rename | Double-click the pane title, or right-click in the list |
 | Maximize | `⤢` on the pane |
+| Resize panes | Drag the lines between panes: vertical lines change widths, horizontal lines change row heights, double-click to even them out. Sizes are kept as ratios, so the panes still fill the window when it is resized, and they are restored on the next launch |
 | Focus pane N | `Ctrl/⌘ + 1…6` |
 | Sidebar | Collapsed to a thin strip with a single `›` by default; hover to float the full sidebar over the panes. `‹` `›` or `Ctrl/⌘ + B` keeps it open or collapses it |
 | Copy, paste | `⌘C` `⌘V` on macOS; `Ctrl+Shift+C` `Ctrl+Shift+V` on Windows and Linux. `Ctrl+V` stays with Claude Code for pasting images |
