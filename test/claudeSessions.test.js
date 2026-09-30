@@ -70,3 +70,20 @@ test('getContext：compact 之後歸零', () => {
   assert.strictEqual(cs.getContext(cwd, 's1', root).tokens, 50002);
   assert.strictEqual(cs.getContext(cwd, 'nope', root), null);
 });
+
+test('listSessions 比照 claude -r：包含子資料夾、claude -w worktree、只有 slash 指令的 session', () => {
+  const root = path.join(tmpdir(), 'projects');
+  const cwd = '/home/me/proj';
+  const put = (dirCwd, id, entries) => writeJsonl(path.join(root, cs.encodeProjectPath(dirCwd), `${id}.jsonl`), entries);
+  put(cwd, 'main', [user('主專案', { cwd })]);
+  put(`${cwd}/src`, 'sub', [user('在子資料夾', { cwd: `${cwd}/src` })]);
+  put(`${cwd}/.claude/worktrees/feat`, 'wt', [user('worktree', { cwd: `${cwd}/.claude/worktrees/feat` })]);
+  put(cwd, 'cmd', [user('<command-name>/review</command-name>', { cwd }), assistant('ok', { input_tokens: 1 }, { cwd })]);
+  put('/home/me/proj-other', 'other', [user('別的專案', { cwd: '/home/me/proj-other' })]);
+  put(cwd, 'empty', [{ type: 'file-history-snapshot', cwd }]);
+  const list = cs.listSessions(cwd, root);
+  assert.deepStrictEqual(list.map((s) => s.id).sort(), ['cmd', 'main', 'sub', 'wt']);
+  assert.strictEqual(list.find((s) => s.id === 'cmd').title, '/review');
+  assert.strictEqual(list.find((s) => s.id === 'sub').cwd, `${cwd}/src`);
+  assert.ok(cs.sessionFile(cwd, 'sub', root).endsWith(path.join(cs.encodeProjectPath(`${cwd}/src`), 'sub.jsonl')));
+});

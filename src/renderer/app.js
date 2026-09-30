@@ -481,6 +481,7 @@ async function startPty(p, { prompt } = {}) {
   const r = await api.spawnPane({
     kind: p.kind,
     cwd: p.cwd,
+    runCwd: p.runCwd || null,
     sessionId: p.sessionId,
     profileId: p.profileId,
     name: p.sessionId ? undefined : p.name,
@@ -499,13 +500,14 @@ async function startPty(p, { prompt } = {}) {
   }
 }
 
-async function spawnPane({ kind, sessionId = null, name = null, prompt = null, profileId = null, cwd = S.cwd }) {
+// cwd：窗格屬於哪個專案；runCwd：程式實際執行的資料夾（子資料夾或 worktree 裡的 session 要在原本的位置續跑）
+async function spawnPane({ kind, sessionId = null, name = null, prompt = null, profileId = null, cwd = S.cwd, runCwd = null }) {
   const w = workspaceFor(cwd);
   if (w.panes.length >= S.maxPanes) {
     toast(t('err.E_MAX_PANES', { max: S.maxPanes }), 'bad');
     return null;
   }
-  const p = { id: null, kind, cwd, sessionId, name, profileId: profileId || S.activeProfile, context: null, exited: false, max: false };
+  const p = { id: null, kind, cwd, runCwd, sessionId, name, profileId: profileId || S.activeProfile, context: null, exited: false, max: false };
   w.el.appendChild(createPaneEl(p));
   w.panes.push(p);
   layoutGrid(w);
@@ -571,7 +573,13 @@ function saveLayout(cwd) {
   if (!w) return;
   api.saveLayout(
     cwd,
-    w.panes.map((p) => ({ kind: p.kind, sessionId: p.sessionId, profileId: p.profileId, ...(p.kind === 'shell' ? { name: p.name } : {}) })),
+    w.panes.map((p) => ({
+      kind: p.kind,
+      sessionId: p.sessionId,
+      profileId: p.profileId,
+      ...(p.runCwd ? { runCwd: p.runCwd } : {}),
+      ...(p.kind === 'shell' ? { name: p.name } : {}),
+    })),
   );
 }
 
@@ -714,7 +722,14 @@ async function openProject(cwd, { restore = true } = {}) {
         continue;
       }
       const s = findSession(saved.kind, saved.sessionId);
-      await spawnPane({ kind: saved.kind, sessionId: saved.sessionId, profileId: saved.profileId, name: s ? s.title : info.names[saved.sessionId], cwd });
+      await spawnPane({
+        kind: saved.kind,
+        sessionId: saved.sessionId,
+        profileId: saved.profileId,
+        name: s ? s.title : info.names[saved.sessionId],
+        cwd,
+        runCwd: saved.runCwd || (s && s.cwd) || null,
+      });
     }
     toast(t('restore.done', { n: info.panes.length }), 'ok');
   }
@@ -759,7 +774,7 @@ function renderSessionList() {
     li.className = open ? 'open' : '';
     li.title = `${sessionTitle(s)}\n${t('unit.messages', { n: s.messageCount })}${s.context ? ` · context ${s.context.pct.toFixed(0)}%` : ''}\n\n${t('session.first')}: ${
       s.firstPrompt || ''
-    }\n${t('session.last')}: ${s.lastPrompt || ''}\n\n${s.id}`;
+    }\n${t('session.last')}: ${s.lastPrompt || ''}\n\n${s.cwd && S.cwd && s.cwd !== S.cwd ? `${s.cwd}\n` : ''}${s.id}`;
     li.innerHTML = `
       <div class="s-title"><span>${esc(sessionTitle(s))}</span>${open ? `<i class="dot" title="${esc(t('session.openNow'))}"></i>` : ''}${
         s.spawnedByAgent ? `<span class="tag sub" title="${esc(t('session.subagentTip'))}">${esc(t('session.subagent'))}</span>` : ''
@@ -791,7 +806,7 @@ function openSession(s) {
   const w = ws();
   const existing = w && w.panes.find((p) => p.sessionId === s.id);
   if (existing) return setFocus(existing);
-  spawnPane({ kind: s.kind, sessionId: s.id, name: s.title || null });
+  spawnPane({ kind: s.kind, sessionId: s.id, name: s.title || null, runCwd: s.cwd || null });
 }
 
 async function newSession(kind) {

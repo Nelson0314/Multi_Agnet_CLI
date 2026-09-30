@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 const { readAll, readTail, readHead } = require('./jsonl');
 
 const DEFAULT_WINDOW = 200_000;
@@ -21,19 +22,91 @@ function encodeProjectPath(cwd) {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+const CASE_INSENSITIVE = process.platform === 'win32' || process.platform === 'darwin';
+const normPath = (p) => {
+  const n = path.resolve(p).replace(/[\\/]+$/, '').replace(/\\/g, '/');
+  return CASE_INSENSITIVE ? n.toLowerCase() : n;
+};
+
 function samePath(a, b) {
-  const norm = (p) => path.resolve(p).replace(/[\\/]+$/, '');
-  return process.platform === 'win32' || process.platform === 'darwin'
-    ? norm(a).toLowerCase() === norm(b).toLowerCase()
-    : norm(a) === norm(b);
+  return normPath(a) === normPath(b);
 }
 
+// child 等於 parent，或在 parent 底下
+function isInside(child, parent) {
+  const c = normPath(child);
+  const p = normPath(parent);
+  return c === p || c.startsWith(p.endsWith('/') ? p : p + '/');
+}
+
+const dirCwdCache = new Map(); // dir -> { mtimeMs, cwd }
+
 function cwdOfDir(dir) {
+  const st = fs.statSync(dir);
+  const hit = dirCwdCache.get(dir);
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.cwd;
+  let cwd = null;
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
-  for (const f of files) {
-    for (const e of readHead(path.join(dir, f))) if (e.cwd) return e.cwd;
+  outer: for (const f of files) {
+    for (const e of readHead(path.join(dir, f))) {
+      if (e.cwd) {
+        cwd = e.cwd;
+        break outer;
+      }
+    }
   }
-  return null;
+  dirCwdCache.set(dir, { mtimeMs: st.mtimeMs, cwd });
+  return cwd;
+}
+
+// 同一個 git repo 的其他 worktree（claude -r 也會列出它們的 session）
+const worktreeCache = new Map(); // cwd -> { at, list }
+function gitWorktrees(cwd) {
+  const hit = worktreeCache.get(cwd);
+  if (hit && Date.now() - hit.at < 60_000) return hit.list;
+  let list = [];
+  try {
+    const out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    list = out
+      .split('\n')
+      .filter((l) => l.startsWith('worktree '))
+      .map((l) => l.slice(9).trim());
+  } catch {}
+  worktreeCache.set(cwd, { at: Date.now(), list });
+  return list;
+}
+
+/**
+ * 這個專案相關的所有 session 資料夾，範圍比照 claude -r：
+ * 專案本身（含 symlink 的真實路徑）、它的子資料夾（包括 claude -w 的 .claude/worktrees）、
+ * 以及同一個 git repo 的其他 worktree。
+ */
+function relatedDirs(root, cwd) {
+  if (!fs.existsSync(root)) return [];
+  const bases = new Set([cwd]);
+  try {
+    bases.add(fs.realpathSync(cwd));
+  } catch {}
+  for (const w of gitWorktrees(cwd)) bases.add(w);
+  const cmp = (s) => (CASE_INSENSITIVE ? s.toLowerCase() : s);
+  const prefixes = [...bases].map((b) => cmp(encodeProjectPath(b).slice(0, 200)));
+  const out = [];
+  for (const name of fs.readdirSync(root)) {
+    const n = cmp(name);
+    if (!prefixes.some((pre) => n === pre || n.startsWith(pre + '-') || n.startsWith(pre))) continue;
+    const dir = path.join(root, name);
+    try {
+      if (!fs.statSync(dir).isDirectory()) continue;
+      const c = cwdOfDir(dir);
+      if (c && [...bases].some((b) => isInside(c, b))) out.push(dir);
+    } catch {}
+  }
+  // 編碼規則對不上時（例如舊版 Claude Code 的編碼），退回逐一比對
+  if (!out.length) {
+    const d = findProjectDir(root, cwd);
+    if (d) out.push(d);
+  }
+  return out;
 }
 
 // 先用編碼規則找；找不到時（例如路徑含特殊字元、規則改變）逐一比對 jsonl 內的 cwd
@@ -120,7 +193,10 @@ function summarize(entries) {
   let lastPrompt = null;
   let userCount = 0;
   let lastTimestamp = null;
+  let hasMessages = false;
+  let command = null;
   for (const e of entries) {
+    if ((e.type === 'user' || e.type === 'assistant') && !e.isSidechain) hasMessages = true;
     if (e.timestamp) lastTimestamp = e.timestamp;
     switch (e.type) {
       case 'custom-title':
@@ -141,6 +217,8 @@ function summarize(entries) {
       case 'user': {
         if (e.isSidechain || e.isMeta) break;
         const t = textOf(e.message && e.message.content);
+        const cmd = !command && t.match(/<command-name>\s*(\/?[^<\s]+)\s*<\/command-name>/);
+        if (cmd) command = cmd[1].startsWith('/') ? cmd[1] : `/${cmd[1]}`;
         if (isRealPrompt(t)) {
           userCount++;
           if (!firstPrompt) firstPrompt = t.trim();
@@ -150,7 +228,7 @@ function summarize(entries) {
       }
     }
   }
-  return { customTitle, aiTitle, summary, firstPrompt, lastPrompt, userCount, lastTimestamp };
+  return { customTitle, aiTitle, summary, firstPrompt, lastPrompt, userCount, lastTimestamp, hasMessages, command };
 }
 
 const cache = new Map(); // file -> { mtimeMs, size, info }
@@ -165,7 +243,9 @@ function readSession(file) {
     kind: 'claude',
     id: path.basename(file, '.jsonl'),
     file,
-    title: s.customTitle || s.aiTitle || s.summary || truncate(s.firstPrompt, 80) || null, // null：由介面顯示「未命名」
+    title: s.customTitle || s.aiTitle || s.summary || truncate(s.firstPrompt, 80) || s.command || null, // null：由介面顯示「未命名」
+    cwd: (entries.find((e) => e.cwd) || {}).cwd || null,
+    hasMessages: s.hasMessages,
     customTitle: s.customTitle,
     firstPrompt: truncate(s.firstPrompt, 300),
     lastPrompt: truncate(s.lastPrompt, 300),
@@ -183,21 +263,28 @@ function truncate(s, n) {
   return one.length > n ? one.slice(0, n - 1) + '…' : one;
 }
 
+// 只要有任何主線對話（包括只下了 slash 指令的 session）就列出，跟 claude -r 一致
 function listSessions(cwd, root = projectsRoot()) {
-  const dir = findProjectDir(root, cwd);
-  if (!dir) return [];
-  const out = [];
-  for (const f of fs.readdirSync(dir)) {
-    if (!f.endsWith('.jsonl')) continue;
-    try {
-      const info = readSession(path.join(dir, f));
-      if (info.messageCount > 0) out.push(info);
-    } catch {}
+  const byId = new Map();
+  for (const dir of relatedDirs(root, cwd)) {
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.jsonl')) continue;
+      try {
+        const info = readSession(path.join(dir, f));
+        if (!info.hasMessages) continue;
+        const prev = byId.get(info.id);
+        if (!prev || info.mtime > prev.mtime) byId.set(info.id, info);
+      } catch {}
+    }
   }
-  return out.sort((a, b) => b.mtime - a.mtime);
+  return [...byId.values()].sort((a, b) => b.mtime - a.mtime);
 }
 
 function sessionFile(cwd, sessionId, root = projectsRoot()) {
+  for (const dir of relatedDirs(root, cwd)) {
+    const f = path.join(dir, `${sessionId}.jsonl`);
+    if (fs.existsSync(f)) return f;
+  }
   const dir = findProjectDir(root, cwd) || path.join(root, encodeProjectPath(cwd));
   return path.join(dir, `${sessionId}.jsonl`);
 }
@@ -214,6 +301,8 @@ module.exports = {
   projectsRoot,
   encodeProjectPath,
   findProjectDir,
+  relatedDirs,
+  isInside,
   listProjects,
   listSessions,
   sessionFile,

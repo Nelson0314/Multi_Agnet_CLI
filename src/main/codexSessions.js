@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { readAll, readTail, readHead } = require('./jsonl');
-const { truncate } = require('./claudeSessions');
+const { truncate, isInside } = require('./claudeSessions');
 
 function defaultCodexHome() {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -144,7 +144,7 @@ function listSessions(cwd, codexHome = defaultCodexHome()) {
     try {
       // 先只讀檔頭判斷 cwd，避免把其他專案的大檔整個讀進來
       const meta = metaOf(readHead(f));
-      if (!meta || !samePath(meta.cwd, cwd)) continue;
+      if (!meta || !meta.cwd || !isInside(meta.cwd, cwd)) continue;
       const info = readSession(f);
       if (info && info.messageCount > 0) out.push(info);
     } catch {}

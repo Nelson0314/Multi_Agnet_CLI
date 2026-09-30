@@ -168,7 +168,9 @@ function registerIpc() {
       store.save();
     }
     const since = Date.now();
-    ptys.spawn(paneId, { cmd, args, cwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows, raw });
+    // 子資料夾或 worktree 裡的 session 在它原本的資料夾續跑，claude --resume 才找得到
+    const runCwd = opts.runCwd && fs.existsSync(opts.runCwd) ? opts.runCwd : cwd;
+    ptys.spawn(paneId, { cmd, args, cwd: runCwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows, raw });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
     return { paneId, sessionId, profileId: profile.id };
   });
