@@ -17,7 +17,7 @@
 - 儀表板顯示每個 Claude 帳號的 5 小時與每週額度、Codex 的 5 小時與每週額度，以及各窗格的 context。
 - 多個 Claude 帳號。每個帳號是一個 `CLAUDE_CONFIG_DIR`，session 歷史共用，所以可以換帳號 `--resume` 同一個 session。
 - 額度用完時提供接手選項：換另一個 Claude 帳號續跑，或產生交接文件交給 Codex。
-- 五種低彩度主題（Terminal、Graphite、Sand、Mono、Paper），整個介面使用系統終端機的等寬字型。
+- 五種主題（Terminal、Graphite、Sand、Mono、Paper），整個介面使用系統終端機的等寬字型。Claude 與 Codex 標籤用它們原本的品牌色。
 - 英文與繁體中文介面，右上角一鍵切換。
 
 ![Sand 主題，繁體中文介面](docs/screenshots/sand-zh.png)
@@ -77,7 +77,7 @@ npm install
 
 儀表板的「外觀」可以選主題、字級與終端機字型。字型預設跟系統終端機一樣：macOS 用 SF Mono 或 Menlo，Windows 用 Cascadia Mono 或 Consolas，Linux 用 DejaVu Sans Mono，中文 fallback 到蘋方、微軟正黑體或 Noto Sans Mono CJK。
 
-「終端機色彩」預設是「柔和」。這個模式不向 CLI 宣告 24-bit 色彩，程式會改用 256 色，而主題會把這 256 色換成降低彩度的版本，所以 Claude Code 的橘色標題和 diff 的紅綠底色也會變柔和。想看原本的顏色就改成「全彩」。切換後新開或重新開啟的窗格才會套用。
+主題只改介面的背景、文字和分隔線。窗格裡程式輸出的顏色完全照原樣顯示，16 色 ANSI 色盤沿用系統原生終端機：Windows 是 Windows Terminal 的 Campbell，macOS 是 Terminal.app，Linux 是 GNOME Terminal 的 Tango。
 
 用 Paper 這種淺色主題時，在 Claude Code 裡執行 `/theme` 選 `Auto (match terminal)`。程式會回答 Claude 的背景色查詢，Claude 就會自動用淺色配色。
 

@@ -20,7 +20,6 @@ const DEFAULTS = {
     theme: 'terminal', // 見 src/renderer/themes.js
     lang: null, // null：依系統語言
     fontSize: 13,
-    termColors: 'muted', // 'muted'：終端機輸出也套用低飽和色盤；'full'：保留程式原本的全彩
     fontFamily: '', // 空字串：用系統終端機預設字型
   },
 };

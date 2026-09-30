@@ -165,9 +165,7 @@ function registerIpc() {
       store.save();
     }
     const since = Date.now();
-    // 柔和配色模式：不宣告 truecolor，CLI 會改用 256 色，由介面主題的色盤重新對應
-    const colorEnv = store.data.settings.termColors === 'full' ? {} : { COLORTERM: null };
-    ptys.spawn(paneId, { cmd, args, cwd, env: { ...profiles.envFor(profile), ...colorEnv }, cols: opts.cols, rows: opts.rows });
+    ptys.spawn(paneId, { cmd, args, cwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
     return { paneId, sessionId, profileId: profile.id };
   });

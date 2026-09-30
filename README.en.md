@@ -17,7 +17,7 @@ If you keep several Claude Code sessions open on one project, every reboot means
 - A dashboard with 5-hour and weekly usage for every Claude account and for Codex, plus context for each open pane.
 - Multiple Claude accounts. Each one is a `CLAUDE_CONFIG_DIR` with shared session history, so another account can `--resume` the same session.
 - When usage runs out, the pane offers to resume on another Claude account or to hand the work to Codex with a handoff file.
-- Five low-saturation themes (Terminal, Graphite, Sand, Mono, Paper). The whole UI uses your system's terminal font.
+- Five themes (Terminal, Graphite, Sand, Mono, Paper). The whole UI uses your system's terminal font, and the Claude and Codex labels keep their brand colors.
 - English and Traditional Chinese UI, switchable from the top bar.
 
 ## Install
@@ -75,7 +75,7 @@ Closing a pane ends the process. The session stays on disk and can be reopened f
 
 The terminal font defaults to what your OS terminal uses: SF Mono or Menlo on macOS, Cascadia Mono or Consolas on Windows, DejaVu Sans Mono on Linux, with CJK fallbacks.
 
-Terminal colors default to Muted. In this mode the app does not advertise 24-bit color, so CLIs fall back to 256 colors, and the theme replaces that palette with a desaturated one. Claude Code's orange headings and red/green diff backgrounds come out muted as well. Pick Full color to keep the original colors. The change applies to panes opened or restarted afterwards.
+Themes only change the app's background, text and borders. Program output in the panes keeps its own colors, and the 16-color ANSI palette matches your OS terminal: Campbell from Windows Terminal, Terminal.app on macOS, Tango from GNOME Terminal on Linux.
 
 With a light theme such as Paper, run `/theme` in Claude Code and choose `Auto (match terminal)`. The app answers Claude's background-color query, so Claude switches to its light palette.
 

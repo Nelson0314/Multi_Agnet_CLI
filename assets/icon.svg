@@ -10,7 +10,7 @@
   <!-- terminal prompt -->
   <polyline points="260,372 400,512 260,652" fill="none" stroke="#e8e3da" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
   <!-- spark, drawn as the cursor -->
-  <g transform="translate(668 512)" stroke="#c98f72" stroke-width="46" stroke-linecap="round">
+  <g transform="translate(668 512)" stroke="#d97757" stroke-width="46" stroke-linecap="round">
     <line x1="0" y1="-136" x2="0" y2="136"/>
     <line x1="-136" y1="0" x2="136" y2="0"/>
     <line x1="-94" y1="-94" x2="94" y2="94"/>

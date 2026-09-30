@@ -35,7 +35,7 @@ function commandFor(cmd, args, { interactive = true } = {}) {
   return { file: shell, args: interactive ? ['-l', '-i', '-c', line] : ['-l', '-c', line] };
 }
 
-// 值為 null 的變數會被移除（例如移除 COLORTERM，讓 CLI 改用 256 色，才能被主題的柔和色盤接管）
+// 預設宣告 truecolor，讓 CLI 用原本的全彩輸出；值為 null 的變數會被移除
 function buildEnv(extra) {
   const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extra };
   for (const k of Object.keys(env)) if (env[k] == null) delete env[k];

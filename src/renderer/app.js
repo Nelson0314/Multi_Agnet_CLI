@@ -1,5 +1,5 @@
 'use strict';
-/* global Terminal, FitAddon, api, I18N, THEMES, terminalFont, muted256 -- api 由 preload 注入；I18N、THEMES 來自 i18n.js、themes.js */
+/* global Terminal, FitAddon, api, I18N, THEMES, terminalFont, nativeAnsi -- api 由 preload 注入；I18N、THEMES 來自 i18n.js、themes.js */
 const $ = (sel, root = document) => root.querySelector(sel);
 
 const S = {
@@ -69,8 +69,7 @@ function termOptions() {
       cursor: th.ui.text,
       cursorAccent: th.ui.bg,
       selectionBackground: th.ui.sel,
-      ...th.term,
-      ...(S.settings.termColors === 'full' ? {} : { extendedAnsi: muted256(th.mutedAmount) }),
+      ...nativeAnsi(S.platform), // 沿用系統原生終端機的 16 色，程式輸出的顏色不做任何改動
     },
   };
 }
@@ -1081,12 +1080,7 @@ function renderSettings() {
       .join('')}</select></label>
     <label>${esc(t('set.lang'))}<select id="setLang">${opt('en', I18N.en['lang.name'], S.lang)}${opt('zh-Hant', I18N['zh-Hant']['lang.name'], S.lang)}</select></label>
     <label>${esc(t('set.fontSize'))}<select id="setFontSize">${[11, 12, 13, 14, 15, 16].map((n) => opt(n, `${n}px`, st.fontSize || 13)).join('')}</select></label>
-    <label>${esc(t('set.font'))}<input id="setFont" value="${esc(st.fontFamily || '')}" placeholder="${esc(t('set.fontPlaceholder'))}" /></label>
-    <label title="${esc(t('set.termColorsHint'))}">${esc(t('set.termColors'))}<select id="setTermColors">${opt('muted', t('set.termColors.muted'), st.termColors || 'muted')}${opt(
-      'full',
-      t('set.termColors.full'),
-      st.termColors || 'muted',
-    )}</select></label>`;
+    <label>${esc(t('set.font'))}<input id="setFont" value="${esc(st.fontFamily || '')}" placeholder="${esc(t('set.fontPlaceholder'))}" /></label>`;
   $('#dashSettings').innerHTML = `
     <label>${esc(t('set.openAtLogin'))}<input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''} ${S.platform === 'linux' ? 'disabled' : ''}></label>
     <label>${esc(t('set.restore'))}<input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
@@ -1112,11 +1106,6 @@ function renderSettings() {
   $('#setFont').onchange = async (e) => {
     await saveSettings({ fontFamily: e.target.value.trim() });
     applyTheme();
-  };
-  $('#setTermColors').onchange = async (e) => {
-    await saveSettings({ termColors: e.target.value });
-    applyTheme();
-    toast(t('set.termColorsHint'));
   };
   $('#setLogin').onchange = (e) => saveSettings({ openAtLogin: e.target.checked });
   $('#setRestore').onchange = (e) => saveSettings({ autoRestore: e.target.checked });
