@@ -30,7 +30,7 @@ function fromClaude(entries) {
         if (c.name === 'TodoWrite' && Array.isArray(c.input.todos)) todos = c.input.todos;
       }
     } else if (e.type === 'system' && e.subtype === 'compact_boundary') {
-      turns.push({ role: 'system', text: '（此處之前的對話已被 /compact 壓縮）' });
+      turns.push({ role: 'system', key: 'compacted' });
     }
   }
   return { turns, files: [...files], todos };
@@ -60,60 +60,100 @@ function git(cwd, args) {
   }
 }
 
-function clip(s, n) {
-  return s.length > n ? s.slice(0, n) + '\n…（截斷）' : s;
+const STRINGS = {
+  'zh-Hant': {
+    title: (n) => `# 交接文件：${n}`,
+    source: '來源',
+    project: '專案目錄',
+    reason: '交接原因',
+    created: '產生時間',
+    reasons: { manual: '手動交接', 'claude-limit': 'Claude 額度用完', 'codex-limit': 'Codex 額度用完', 'switch-profile': '切換帳號' },
+    goal: '## 原始目標（第一個使用者需求）',
+    none: '（無）',
+    todos: '## 待辦清單（最後狀態）',
+    inProgress: '（進行中）',
+    files: '## 這個 session 改過的檔案',
+    git: '## Git 狀態',
+    branch: '分支',
+    noCommit: '（沒有 commit 或 detached HEAD）',
+    clean: '（工作目錄沒有變更）',
+    recent: (n) => `## 最近 ${n} 則對話`,
+    user: '使用者',
+    compacted: '（這之前的對話已被 /compact 壓縮）',
+    clipped: '…（已截斷）',
+    prompt: (rel) =>
+      `你要接手另一個 AI agent 沒做完的工作。先讀交接文件 ${rel}，再用 git status 和 git diff 確認程式碼現況，` +
+      '簡短回報你理解的進度和下一步，然後繼續完成原始目標。',
+  },
+  en: {
+    title: (n) => `# Handoff: ${n}`,
+    source: 'Source',
+    project: 'Project',
+    reason: 'Reason',
+    created: 'Created',
+    reasons: { manual: 'Manual handoff', 'claude-limit': 'Claude usage limit reached', 'codex-limit': 'Codex usage limit reached', 'switch-profile': 'Account switch' },
+    goal: '## Original goal (first user request)',
+    none: '(none)',
+    todos: '## Todo list (last known state)',
+    inProgress: ' (in progress)',
+    files: '## Files changed in this session',
+    git: '## Git state',
+    branch: 'Branch',
+    noCommit: '(no commits or detached HEAD)',
+    clean: '(working tree clean)',
+    recent: (n) => `## Last ${n} messages`,
+    user: 'User',
+    compacted: '(Earlier conversation was compacted with /compact)',
+    clipped: '… (truncated)',
+    prompt: (rel) =>
+      `You are taking over unfinished work from another AI agent. Read the handoff file ${rel} first, ` +
+      'check the current code with git status and git diff, give a short summary of where things stand and what you will do next, then continue toward the original goal.',
+  },
+};
+
+const stringsFor = (lang) => STRINGS[lang] || STRINGS['zh-Hant'];
+
+function clip(s, n, L) {
+  return s.length > n ? s.slice(0, n) + '\n' + L.clipped : s;
 }
 
-function render({ fromKind, sessionName, sessionId, cwd, digest, reason, recentTurns = 12 }) {
+function render({ fromKind, sessionName, sessionId, cwd, digest, reason, lang, recentTurns = 12 }) {
+  const L = stringsFor(lang);
   const first = digest.turns.find((t) => t.role === 'user');
   const recent = digest.turns.slice(-recentTurns);
   const lines = [];
   const who = fromKind === 'claude' ? 'Claude Code' : 'Codex';
-  lines.push(`# 交接文件：${sessionName || sessionId}`);
-  lines.push('');
-  lines.push(`- 來源：${who} session \`${sessionId}\``);
-  lines.push(`- 專案目錄：\`${cwd}\``);
-  lines.push(`- 交接原因：${reason || '手動交接'}`);
-  lines.push(`- 產生時間：${new Date().toISOString()}`);
-  lines.push('');
-  lines.push('## 原始目標（第一個使用者需求）');
-  lines.push('');
-  lines.push(first ? clip(first.text, 3000) : '（無）');
-  lines.push('');
+  lines.push(L.title(sessionName || sessionId), '');
+  lines.push(`- ${L.source}: ${who} session \`${sessionId}\``);
+  lines.push(`- ${L.project}: \`${cwd}\``);
+  lines.push(`- ${L.reason}: ${L.reasons[reason] || reason || L.reasons.manual}`);
+  lines.push(`- ${L.created}: ${new Date().toISOString()}`, '');
+  lines.push(L.goal, '', first ? clip(first.text, 3000, L) : L.none, '');
   if (digest.todos && digest.todos.length) {
-    lines.push('## 待辦清單（最後狀態）');
-    lines.push('');
-    for (const t of digest.todos) lines.push(`- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}${t.status === 'in_progress' ? '（進行中）' : ''}`);
+    lines.push(L.todos, '');
+    for (const t of digest.todos) lines.push(`- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}${t.status === 'in_progress' ? L.inProgress : ''}`);
     lines.push('');
   }
   if (digest.files.length) {
-    lines.push('## 這個 session 修改過的檔案');
-    lines.push('');
+    lines.push(L.files, '');
     for (const f of digest.files) lines.push(`- ${path.isAbsolute(f) ? path.relative(cwd, f) || f : f}`);
     lines.push('');
   }
   const status = git(cwd, ['status', '--short']);
   const stat = git(cwd, ['diff', '--stat']);
-  const branch = git(cwd, ['branch', '--show-current']) || git(cwd, ['rev-parse', '--short', 'HEAD']) || '(detached / 無 commit)';
+  const branch = git(cwd, ['branch', '--show-current']) || git(cwd, ['rev-parse', '--short', 'HEAD']) || L.noCommit;
   if (status !== null) {
-    lines.push('## Git 狀態');
-    lines.push('');
-    lines.push(`分支：\`${branch}\``);
-    lines.push('');
-    lines.push('```');
-    lines.push(clip(status || '(工作目錄乾淨)', 4000));
-    if (stat) lines.push('', clip(stat, 4000));
-    lines.push('```');
-    lines.push('');
+    lines.push(L.git, '', `${L.branch}: \`${branch}\``, '', '```', clip(status || L.clean, 4000, L));
+    if (stat) lines.push('', clip(stat, 4000, L));
+    lines.push('```', '');
   }
-  lines.push(`## 最近 ${recent.length} 則對話`);
-  lines.push('');
+  lines.push(L.recent(recent.length), '');
   for (const t of recent) {
-    const label = t.role === 'user' ? '👤 使用者' : t.role === 'assistant' ? `🤖 ${who}` : 'ℹ️';
-    lines.push(`### ${label}`);
-    lines.push('');
-    lines.push(clip(t.text, t.role === 'user' ? 3000 : 2000));
-    lines.push('');
+    if (t.role === 'system') {
+      lines.push(`_${L[t.key] || t.text}_`, '');
+      continue;
+    }
+    lines.push(`### ${t.role === 'user' ? L.user : who}`, '', clip(t.text, t.role === 'user' ? 3000 : 2000, L), '');
   }
   return lines.join('\n');
 }
@@ -132,7 +172,7 @@ function ensureExcluded(cwd) {
 }
 
 /**
- * @param {{fromKind:'claude'|'codex', sessionId:string, cwd:string, sessionName?:string, reason?:string,
+ * @param {{fromKind:'claude'|'codex', sessionId:string, cwd:string, sessionName?:string, reason?:string, lang?:'en'|'zh-Hant',
  *          claudeProjectsRoot?:string, codexHome?:string, toKind:'claude'|'codex'}} opts
  * @returns {{file:string, prompt:string}}
  */
@@ -141,7 +181,7 @@ function createHandoff(opts) {
     opts.fromKind === 'claude'
       ? claude.sessionFile(opts.cwd, opts.sessionId, opts.claudeProjectsRoot)
       : codex.findSessionFile(opts.sessionId, opts.codexHome);
-  if (!file || !fs.existsSync(file)) throw new Error('找不到來源 session 的紀錄檔');
+  if (!file || !fs.existsSync(file)) throw new Error('E_NO_TRANSCRIPT');
   const entries = readAll(file);
   const digest = opts.fromKind === 'claude' ? fromClaude(entries) : fromCodex(entries);
   const md = render({ ...opts, digest });
@@ -152,10 +192,7 @@ function createHandoff(opts) {
   const out = path.join(dir, `${stamp}-${opts.fromKind}-to-${opts.toKind}.md`);
   fs.writeFileSync(out, md);
   const rel = path.relative(opts.cwd, out).split(path.sep).join('/');
-  const prompt =
-    `你正在接手另一個 AI agent 未完成的工作。請先完整閱讀交接文件 ${rel}` +
-    '，接著用 git status / git diff 確認目前程式碼狀態，然後簡短回報你理解的進度與下一步，再繼續完成原始目標。';
-  return { file: out, prompt };
+  return { file: out, prompt: stringsFor(opts.lang).prompt(rel) };
 }
 
 module.exports = { createHandoff, fromClaude, fromCodex, render };

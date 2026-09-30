@@ -9,10 +9,17 @@ const ptyDir = path.dirname(require.resolve('node-pty/package.json'));
 const prebuild = path.join(ptyDir, 'prebuilds', `${process.platform}-${process.arch}`);
 if (fs.existsSync(prebuild) || fs.existsSync(path.join(ptyDir, 'build', 'Release', 'pty.node'))) {
   console.log('[postinstall] node-pty 已有可用的原生模組，略過編譯');
-  process.exit(0);
+} else {
+  const r = spawnSync('npx', ['electron-rebuild', '-f', '-w', 'node-pty'], { stdio: 'inherit', shell: process.platform === 'win32' });
+  if (r.status !== 0) {
+    console.warn('[postinstall] electron-rebuild 失敗，改用 node-gyp 以 Node headers 編譯（N-API 相容 Electron）');
+    spawnSync('npx', ['node-gyp', 'rebuild'], { cwd: ptyDir, stdio: 'inherit', shell: process.platform === 'win32' });
+  }
 }
-const r = spawnSync('npx', ['electron-rebuild', '-f', '-w', 'node-pty'], { stdio: 'inherit', shell: process.platform === 'win32' });
-if (r.status !== 0) {
-  console.warn('[postinstall] electron-rebuild 失敗，改用 node-gyp 以 Node headers 編譯（N-API 相容 Electron）');
-  spawnSync('npx', ['node-gyp', 'rebuild'], { cwd: ptyDir, stdio: 'inherit', shell: process.platform === 'win32' });
+
+// 在桌面建立捷徑（失敗只會印警告）
+try {
+  require('./create-shortcut').main();
+} catch (e) {
+  console.warn(`[shortcut] 無法建立桌面捷徑：${e.message}`);
 }

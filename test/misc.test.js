@@ -11,6 +11,7 @@ const hit = (s) => LIMIT_PATTERNS.some((re) => re.test(s.replace(ANSI, '')));
 test('額度用完訊息偵測', () => {
   assert.ok(hit('\x1b[31mClaude usage limit reached.\x1b[0m Your limit will reset at 3pm'));
   assert.ok(hit("You've hit your usage limit. Upgrade to Pro"));
+  assert.ok(hit('You have hit your usage limit'));
   assert.ok(hit('5-hour limit reached ∙ resets 3pm'));
   assert.ok(!hit('I will limit the number of retries'));
 });
@@ -41,4 +42,11 @@ test('Store 保留預設值並持久化', () => {
   assert.strictEqual(s2.data.lastProject, '/p');
   assert.strictEqual(s2.data.projects['/p'].panes[0].sessionId, 'x');
   assert.strictEqual(s2.data.settings.fallback, 'ask');
+});
+
+test('buildEnv：null 會移除變數，預設宣告 truecolor', () => {
+  const { buildEnv } = require('../src/main/ptyManager');
+  assert.strictEqual(buildEnv({}).COLORTERM, 'truecolor');
+  assert.ok(!('COLORTERM' in buildEnv({ COLORTERM: null })));
+  assert.strictEqual(buildEnv({ CLAUDE_CONFIG_DIR: '/x' }).CLAUDE_CONFIG_DIR, '/x');
 });

@@ -1,12 +1,14 @@
 {
   "name": "multi-agent-cli",
   "version": "0.1.0",
-  "description": "單一視窗管理同一專案下的多個 Claude Code / Codex session，含額度儀表板、帳號切換與 Codex fallback",
+  "description": "One window for all Claude Code and Codex sessions in a project: up to 6 terminals side by side, usage and context dashboard, account switching, Codex fallback.",
   "main": "src/main/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "postinstall": "node scripts/postinstall.js",
+    "shortcut": "node scripts/create-shortcut.js",
+    "icons": "electron scripts/build-icons.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
@@ -18,5 +20,10 @@
     "@electron/rebuild": "^3.7.0",
     "electron": "^33.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "productName": "Multi-Agent CLI",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nelson0314/Multi_Agnet_CLI.git"
+  }
 }

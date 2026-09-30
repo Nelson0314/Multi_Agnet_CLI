@@ -14,6 +14,11 @@ const profiles = require('./profiles');
 const { createHandoff } = require('./handoff');
 
 const MAX_PANES = 6;
+const ICON = path.join(__dirname, '..', '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+
+// 固定 userData 位置（package.json 加了 productName 之後，Electron 預設路徑會改變）
+app.setPath('userData', path.join(app.getPath('appData'), 'multi-agent-cli'));
+if (process.platform === 'win32') app.setAppUserModelId('io.github.nelson0314.multi-agent-cli');
 
 let win;
 let store;
@@ -53,8 +58,9 @@ function createWindow() {
     height: 1000,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0f1115',
+    backgroundColor: store.data.settings.windowBg || '#161616',
     title: 'Multi-Agent CLI',
+    icon: ICON,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -148,7 +154,7 @@ function registerIpc() {
   ipcMain.handle('pane:spawn', (_e, opts) => {
     // 上限以「每個專案」計算：不同專案的 workspace 可以同時在背景跑
     const running = [...panes.values()].filter((p) => p.cwd === opts.cwd && (p.kind === 'claude' || p.kind === 'codex')).length;
-    if ((opts.kind === 'claude' || opts.kind === 'codex') && running >= MAX_PANES) throw new Error(`最多同時開 ${MAX_PANES} 個 session`);
+    if ((opts.kind === 'claude' || opts.kind === 'codex') && running >= MAX_PANES) throw new Error('E_MAX_PANES');
     const profile = store.profile(opts.profileId || store.data.activeProfile);
     const { cmd, args, sessionId } = spawnArgs(opts);
     const paneId = crypto.randomUUID();
@@ -159,7 +165,9 @@ function registerIpc() {
       store.save();
     }
     const since = Date.now();
-    ptys.spawn(paneId, { cmd, args, cwd, env: profiles.envFor(profile), cols: opts.cols, rows: opts.rows });
+    // 柔和配色模式：不宣告 truecolor，CLI 會改用 256 色，由介面主題的色盤重新對應
+    const colorEnv = store.data.settings.termColors === 'full' ? {} : { COLORTERM: null };
+    ptys.spawn(paneId, { cmd, args, cwd, env: { ...profiles.envFor(profile), ...colorEnv }, cols: opts.cols, rows: opts.rows });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
     return { paneId, sessionId, profileId: profile.id };
   });
@@ -225,7 +233,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('profiles:remove', (_e, id) => {
-    if (id === profiles.DEFAULT_ID) throw new Error('無法刪除預設帳號');
+    if (id === profiles.DEFAULT_ID) throw new Error('E_DEFAULT_PROFILE');
     store.data.profiles = store.data.profiles.filter((p) => p.id !== id);
     if (store.data.activeProfile === id) store.data.activeProfile = profiles.DEFAULT_ID;
     store.save();
@@ -270,6 +278,7 @@ function registerIpc() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(path.join(__dirname, '..', '..', 'assets', 'icon.png'));
   store = new Store(app.getPath('userData'));
   ptys = new PtyManager(send);
   registerIpc();

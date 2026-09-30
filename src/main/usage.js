@@ -88,9 +88,9 @@ async function fetchUsage(configDir, isDefault, { force = false } = {}) {
   const oauth = getOAuth(configDir, isDefault);
   let value;
   if (!oauth || !oauth.accessToken) {
-    value = { ok: false, reason: '尚未登入（找不到 OAuth 憑證）' };
+    value = { ok: false, reason: 'no-credentials' };
   } else if (oauth.expiresAt && oauth.expiresAt < Date.now()) {
-    value = { ok: false, reason: 'Token 已過期：在此帳號開任一個 session 即會自動更新' };
+    value = { ok: false, reason: 'token-expired' };
   } else {
     try {
       const raw = await getJson(USAGE_URL, {
@@ -101,7 +101,7 @@ async function fetchUsage(configDir, isDefault, { force = false } = {}) {
       });
       value = { ok: true, plan: oauth.subscriptionType || null, ...normalizeUsage(raw) };
     } catch (e) {
-      value = { ok: false, reason: e.status === 401 ? 'Token 失效，請重新登入' : `無法取得額度：${e.message}` };
+      value = { ok: false, reason: e.status === 401 ? 'token-invalid' : 'fetch-failed', detail: e.message };
     }
   }
   value.fetchedAt = Date.now();

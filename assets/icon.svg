@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2826"/>
+      <stop offset="1" stop-color="#191816"/>
+    </linearGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="196" fill="url(#bg)"/>
+  <rect x="74" y="74" width="876" height="876" rx="194" fill="none" stroke="#45413c" stroke-width="4"/>
+  <!-- terminal prompt -->
+  <polyline points="260,372 400,512 260,652" fill="none" stroke="#e8e3da" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- spark, drawn as the cursor -->
+  <g transform="translate(668 512)" stroke="#c98f72" stroke-width="46" stroke-linecap="round">
+    <line x1="0" y1="-136" x2="0" y2="136"/>
+    <line x1="-136" y1="0" x2="136" y2="0"/>
+    <line x1="-94" y1="-94" x2="94" y2="94"/>
+    <line x1="-94" y1="94" x2="94" y2="-94"/>
+  </g>
+</svg>

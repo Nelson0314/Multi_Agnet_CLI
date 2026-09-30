@@ -40,3 +40,24 @@ test('Claude → Codex 交接文件包含目標、待辦、修改檔案與 git �
   assert.match(fs.readFileSync(path.join(cwd, '.git', 'info', 'exclude'), 'utf8'), /^\.multi-agent\/$/m);
   assert.doesNotMatch(execFileSync('git', ['status', '--short'], { cwd, encoding: 'utf8' }), /multi-agent/);
 });
+
+test('交接文件依語言輸出，且不含 emoji 標題', () => {
+  const cwd = tmpdir();
+  const root = path.join(tmpdir(), 'projects');
+  writeJsonl(path.join(root, cs.encodeProjectPath(cwd), 's.jsonl'), [
+    user('Build the login page', { cwd }),
+    { type: 'system', subtype: 'compact_boundary' },
+    assistant('Form done', { input_tokens: 5 }),
+  ]);
+  const en = createHandoff({ fromKind: 'claude', toKind: 'codex', sessionId: 's', cwd, lang: 'en', reason: 'claude-limit', claudeProjectsRoot: root });
+  const md = fs.readFileSync(en.file, 'utf8');
+  assert.match(md, /^# Handoff: s$/m);
+  assert.match(md, /Reason: Claude usage limit reached/);
+  assert.match(md, /### User/);
+  assert.match(md, /### Claude Code/);
+  assert.match(md, /compacted/);
+  assert.match(en.prompt, /^You are taking over/);
+  assert.doesNotMatch(md, /[\u{1F300}-\u{1FAFF}]/u);
+  const zh = createHandoff({ fromKind: 'claude', toKind: 'codex', sessionId: 's', cwd, lang: 'zh-Hant', claudeProjectsRoot: root });
+  assert.match(fs.readFileSync(zh.file, 'utf8'), /交接原因: 手動交接/);
+});

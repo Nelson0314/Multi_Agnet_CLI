@@ -13,7 +13,8 @@ function defaultClaudeDir() {
 }
 
 function defaultProfile() {
-  return { id: DEFAULT_ID, name: '預設帳號', claudeConfigDir: null, codexHome: null, shareHistory: true };
+  // name 為 null：由介面依語言顯示「預設帳號 / Default」
+  return { id: DEFAULT_ID, name: null, claudeConfigDir: null, codexHome: null, shareHistory: true };
 }
 
 function claudeDirOf(profile) {

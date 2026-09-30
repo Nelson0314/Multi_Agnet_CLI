@@ -1,52 +1,55 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' file:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'; script-src 'self' file:" />
     <title>Multi-Agent CLI</title>
     <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header id="topbar">
-      <div class="brand">⧉ Multi-Agent</div>
-      <button id="projectBtn" class="project-btn" title="切換專案"><span id="projectName">選擇專案…</span> ▾</button>
+      <div class="brand"><img src="../../assets/icon-256.png" alt="" /><span>multi-agent</span></div>
+      <button id="projectBtn" class="project-btn"><span id="projectName"></span><span class="caret">▾</span></button>
       <div class="spacer"></div>
       <div id="meters" class="meters"></div>
-      <button id="dashBtn" class="ghost" title="儀表板">▦ 儀表板</button>
-      <button id="accountBtn" class="account-btn" title="帳號"><span class="avatar" id="accountAvatar">?</span><span id="accountName">帳號</span> ▾</button>
+      <button id="dashBtn" class="ghost" data-i18n="top.dashboard"></button>
+      <button id="langBtn" class="ghost lang-btn"></button>
+      <button id="accountBtn" class="account-btn"><span class="avatar" id="accountAvatar"></span><span id="accountName"></span><span class="caret">▾</span></button>
     </header>
 
     <div id="layout">
       <aside id="sidebar">
         <div class="side-actions">
-          <button id="newClaude" class="primary">＋ Claude</button>
-          <button id="newCodex">＋ Codex</button>
+          <button id="newClaude" data-i18n="side.newClaude"></button>
+          <button id="newCodex" data-i18n="side.newCodex"></button>
         </div>
-        <input id="search" type="search" placeholder="搜尋 session…" />
+        <input id="search" type="search" data-i18n-placeholder="side.search" />
         <div class="tabs">
           <button class="tab active" data-tab="claude">Claude <span id="countClaude"></span></button>
           <button class="tab" data-tab="codex">Codex <span id="countCodex"></span></button>
         </div>
         <ul id="sessionList" class="session-list"></ul>
-        <div class="side-foot"><span id="paneCount">0 / 6</span> 個 session 開啟中</div>
+        <div class="side-foot" id="paneCount"></div>
       </aside>
 
       <main id="workspaces">
         <div id="empty" class="empty">
-          <h2>選擇一個專案開始</h2>
-          <p>左側會列出該目錄底下所有 Claude / Codex session，點一下即可開啟（最多 6 個並排）。</p>
-          <button id="emptyPick" class="primary">開啟專案資料夾</button>
+          <h2 data-i18n="empty.title"></h2>
+          <p data-i18n="empty.body"></p>
+          <button id="emptyPick" class="primary" data-i18n="empty.pick"></button>
           <ul id="recentList" class="recent-list"></ul>
         </div>
       </main>
 
       <aside id="dashboard" hidden>
-        <h3>額度</h3>
+        <h3 data-i18n="dash.usage"></h3>
         <div id="dashUsage"></div>
-        <h3>開啟中 session 的 context 深度</h3>
+        <h3 data-i18n="dash.context"></h3>
         <div id="dashContext"></div>
-        <h3>設定</h3>
+        <h3 data-i18n="dash.appearance"></h3>
+        <div id="dashAppearance" class="settings"></div>
+        <h3 data-i18n="dash.settings"></h3>
         <div id="dashSettings" class="settings"></div>
       </aside>
     </div>
@@ -57,6 +60,8 @@
 
     <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="themes.js"></script>
+    <script src="i18n.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -165,7 +165,7 @@ function readSession(file) {
     kind: 'claude',
     id: path.basename(file, '.jsonl'),
     file,
-    title: s.customTitle || s.aiTitle || s.summary || truncate(s.firstPrompt, 80) || '(未命名 session)',
+    title: s.customTitle || s.aiTitle || s.summary || truncate(s.firstPrompt, 80) || null, // null：由介面顯示「未命名」
     customTitle: s.customTitle,
     firstPrompt: truncate(s.firstPrompt, 300),
     lastPrompt: truncate(s.lastPrompt, 300),

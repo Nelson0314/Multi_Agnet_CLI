@@ -121,7 +121,7 @@ function readSession(file) {
     source: meta.source,
     // 由 Claude 透過 MCP / exec 呼叫出來的 Codex，在 UI 上標成「子 agent」
     spawnedByAgent: ['mcp', 'exec'].includes(String(meta.source).toLowerCase()),
-    title: truncate(firstPrompt, 80) || '(未命名 Codex session)',
+    title: truncate(firstPrompt, 80) || null,
     firstPrompt: truncate(firstPrompt, 300),
     lastPrompt: truncate(lastPrompt, 300),
     messageCount: count,

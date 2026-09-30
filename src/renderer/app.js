@@ -1,5 +1,5 @@
 'use strict';
-/* global Terminal, FitAddon, api -- api 由 preload 透過 contextBridge 注入 */
+/* global Terminal, FitAddon, api, I18N, THEMES, terminalFont, muted256 -- api 由 preload 注入；I18N、THEMES 來自 i18n.js、themes.js */
 const $ = (sel, root = document) => root.querySelector(sel);
 
 const S = {
@@ -16,6 +16,7 @@ const S = {
   usage: null,
   focused: null,
   warnedLimit: new Set(),
+  lang: 'en',
 };
 const paneByPty = new Map();
 const pendingData = new Map();
@@ -25,25 +26,121 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const basename = (p) => (p || '').split(/[\\/]/).filter(Boolean).pop() || p;
 const kindLabel = (k) => (k === 'codex' ? 'Codex' : 'Claude');
 const profileOf = (id) => S.profiles.find((p) => p.id === id) || S.profiles[0];
+
+// ---------------------------------------------------------------- i18n / theme
+function t(key, vars = {}) {
+  const dict = I18N[S.lang] || I18N.en;
+  const str = dict[key] ?? I18N.en[key] ?? key;
+  return str.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
+}
+
+function detectLang() {
+  return /^zh/i.test(navigator.language || '') ? 'zh-Hant' : 'en';
+}
+
+// 預設帳號在舊版存成「預設帳號」，新版存 null，兩者都依目前語言顯示
+function profileName(p) {
+  if (!p) return '';
+  return p.id === 'default' && (!p.name || p.name === '預設帳號') ? t('profile.default') : p.name;
+}
+
+function sessionTitle(s) {
+  return s.title || t('session.untitled');
+}
+
+// IPC 錯誤訊息會被包成 "Error invoking remote method ...: Error: E_CODE"
+function errMsg(e) {
+  const m = String((e && e.message) || e).match(/E_[A-Z_]+/);
+  return m ? t(`err.${m[0]}`, { max: S.maxPanes }) : String((e && e.message) || e);
+}
+
+function currentTheme() {
+  return THEMES[S.settings.theme] || THEMES.terminal;
+}
+
+function termOptions() {
+  const th = currentTheme();
+  return {
+    fontFamily: terminalFont(S.platform, S.settings.fontFamily),
+    fontSize: S.settings.fontSize || 13,
+    theme: {
+      background: th.ui.bg,
+      foreground: th.ui.text,
+      cursor: th.ui.text,
+      cursorAccent: th.ui.bg,
+      selectionBackground: th.ui.sel,
+      ...th.term,
+      ...(S.settings.termColors === 'full' ? {} : { extendedAnsi: muted256(th.mutedAmount) }),
+    },
+  };
+}
+
+function applyTheme() {
+  const ui = currentTheme().ui;
+  const root = document.documentElement.style;
+  const map = { bg: '--bg', panel: '--panel', panel2: '--panel-2', line: '--line', lineStrong: '--line-strong', text: '--text', muted: '--muted', faint: '--faint', claude: '--claude', codex: '--codex', ok: '--ok', warn: '--warn', bad: '--bad', sel: '--sel' };
+  for (const [k, v] of Object.entries(map)) root.setProperty(v, ui[k]);
+  root.setProperty('--font', terminalFont(S.platform, S.settings.fontFamily));
+  document.documentElement.dataset.theme = S.settings.theme || 'terminal';
+  const opts = termOptions();
+  for (const p of allPanes()) {
+    p.term.options.fontFamily = opts.fontFamily;
+    p.term.options.fontSize = opts.fontSize;
+    p.term.options.theme = opts.theme;
+    try {
+      p.fit.fit();
+    } catch {}
+  }
+}
+
+function applyLang() {
+  document.documentElement.lang = S.lang;
+  document.querySelectorAll('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n)));
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+  $('#langBtn').textContent = S.lang === 'en' ? '中' : 'EN';
+  $('#langBtn').title = S.lang === 'en' ? I18N['zh-Hant']['lang.name'] : I18N.en['lang.name'];
+  renderAccount();
+  for (const p of allPanes()) {
+    renderPaneHead(p);
+    renderPaneCtx(p);
+    localizePaneButtons(p);
+  }
+  if (!S.cwd) $('#projectName').textContent = t('top.project');
+  layoutGridIfAny();
+  renderSessionList();
+  renderMeters();
+  renderDashboard();
+}
+
+function allPanes() {
+  return [...S.workspaces.values()].flatMap((w) => w.panes);
+}
+
+function layoutGridIfAny() {
+  const w = ws();
+  if (w) layoutGrid(w);
+  else $('#paneCount').textContent = t('side.open', { n: 0, max: S.maxPanes });
+}
 const ws = () => S.workspaces.get(S.cwd);
 
 function fmtAgo(ms) {
   const s = (Date.now() - ms) / 1000;
-  if (s < 60) return '剛剛';
-  if (s < 3600) return `${Math.floor(s / 60)} 分鐘前`;
-  if (s < 86400) return `${Math.floor(s / 3600)} 小時前`;
-  return `${Math.floor(s / 86400)} 天前`;
+  if (s < 60) return t('time.now');
+  if (s < 3600) return t('time.min', { n: Math.floor(s / 60) });
+  if (s < 86400) return t('time.hour', { n: Math.floor(s / 3600) });
+  return t('time.day', { n: Math.floor(s / 86400) });
 }
 function fmtTokens(n) {
   if (n == null) return '–';
   return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 function fmtReset(ts) {
-  if (!ts) return '';
-  const s = Math.max(0, (ts - Date.now()) / 1000);
-  if (s < 3600) return `${Math.ceil(s / 60)} 分`;
-  if (s < 86400) return `${Math.floor(s / 3600)} 時 ${Math.floor((s % 3600) / 60)} 分`;
-  return `${Math.floor(s / 86400)} 天 ${Math.floor((s % 86400) / 3600)} 時`;
+  if (!ts || ts <= Date.now()) return ''; // 已過重置時間的舊資料不顯示倒數
+  const s = (ts - Date.now()) / 1000;
+  if (s < 3600) return t('reset.min', { m: Math.ceil(s / 60) });
+  if (s < 86400) return t('reset.hour', { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60) });
+  return t('reset.day', { d: Math.floor(s / 86400), h: Math.floor((s % 86400) / 3600) });
 }
 const barClass = (pct) => (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : '');
 function bar(pct) {
@@ -51,7 +148,7 @@ function bar(pct) {
   return `<div class="bar ${barClass(v)}"><i style="width:${v}%"></i></div>`;
 }
 function initials(p) {
-  const s = (p.account && p.account.email) || p.name || '?';
+  const s = (p.account && p.account.email) || profileName(p) || '?';
   return s.trim()[0].toUpperCase();
 }
 
@@ -113,7 +210,7 @@ function promptModal(title, { value = '', placeholder = '', hint = '' } = {}) {
   return modal(
     `<h3>${esc(title)}</h3><div class="field"><input id="mInput" value="${esc(value)}" placeholder="${esc(placeholder)}" /></div>
      ${hint ? `<div class="hint">${esc(hint)}</div>` : ''}
-     <div class="actions"><button id="mCancel">取消</button><button id="mOk" class="primary">確定</button></div>`,
+     <div class="actions"><button id="mCancel">${t('modal.cancel')}</button><button id="mOk" class="primary">${t('modal.ok')}</button></div>`,
     (card, close) => {
       const input = $('#mInput', card);
       input.focus();
@@ -131,17 +228,27 @@ function promptModal(title, { value = '', placeholder = '', hint = '' } = {}) {
 // ---------------------------------------------------------------- terminals
 function makeTerminal(container, getPtyId) {
   const term = new Terminal({
-    fontFamily: 'Menlo, Consolas, "Cascadia Mono", "Noto Sans Mono CJK TC", "Sarasa Mono TC", monospace',
-    fontSize: 13,
+    ...termOptions(),
     cursorBlink: true,
     scrollback: 10000,
     allowProposedApi: true,
-    theme: { background: '#000000' },
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(container);
   term.onData((d) => getPtyId() && api.write(getPtyId(), d));
+  // 回答 OSC 10/11 前景、背景色查詢，Claude Code 的「Auto (match terminal)」主題才能判斷要用深色或淺色
+  const xColor = (hex) => `rgb:${[1, 3, 5].map((i) => hex.slice(i, i + 2).repeat(2)).join('/')}`;
+  for (const [code, key] of [
+    [10, 'text'],
+    [11, 'bg'],
+  ]) {
+    term.parser.registerOscHandler(code, (data) => {
+      if (data !== '?' || !getPtyId()) return false;
+      api.write(getPtyId(), `\x1b]${code};${xColor(currentTheme().ui[key])}\x1b\\`);
+      return true;
+    });
+  }
   // 複製貼上：macOS 用 ⌘C/⌘V；Windows/Linux 用 Ctrl+Shift+C/V。
   // 純 Ctrl+V 保留給 Claude Code（它會自己讀剪貼簿裡的圖片）
   term.attachCustomKeyEventHandler((e) => {
@@ -188,7 +295,7 @@ api.onExit((id, code) => {
   if (p.onExit) return p.onExit(code);
   p.exited = true;
   p.el.classList.add('exited');
-  p.term.write(`\r\n\x1b[90m── 程式已結束 (exit ${code})。按「↻」重新開啟，或關閉此窗格 ──\x1b[0m\r\n`);
+  p.term.write(`\r\n\x1b[90m${t('pane.exited', { code })}\x1b[0m\r\n`);
 });
 api.onLimit((id, text) => {
   const p = paneByPty.get(id);
@@ -248,11 +355,11 @@ function layoutGrid(w) {
   }
   w.panes.forEach((p, i) => ($('.pane-idx', p.el).textContent = `${i + 1}`));
   $('#empty').hidden = !!S.cwd;
-  $('#paneCount').textContent = `${n} / ${S.maxPanes}`;
+  $('#paneCount').textContent = t('side.open', { n, max: S.maxPanes });
 }
 
 function paneTitle(p) {
-  return p.name || `新 ${kindLabel(p.kind)} session`;
+  return p.name || t('session.new', { kind: kindLabel(p.kind) });
 }
 
 function renderPaneHead(p) {
@@ -260,13 +367,13 @@ function renderPaneHead(p) {
   const head = $('.pane-head', p.el);
   $('.tag.kind', head).className = `tag kind ${p.kind}`;
   $('.tag.kind', head).textContent = kindLabel(p.kind);
-  const t = $('.pane-title', head);
-  if (!t.querySelector('input')) {
-    t.textContent = paneTitle(p);
-    t.title = `${paneTitle(p)}\n${p.sessionId || '(等待 session id…)'}\n雙擊可重新命名`;
+  const titleEl = $('.pane-title', head);
+  if (!titleEl.querySelector('input')) {
+    titleEl.textContent = paneTitle(p);
+    titleEl.title = `${paneTitle(p)}\n${p.sessionId || t('session.waitingId')}\n${t('session.renameHint')}`;
   }
   const pt = $('.tag.profile', head);
-  pt.textContent = prof ? prof.name : '';
+  pt.textContent = prof ? profileName(prof) : '';
   pt.hidden = p.kind !== 'claude' || S.profiles.length < 2;
   p.el.className = `pane ${p.kind} ${S.focused === p ? 'focused' : ''} ${p.max ? 'max' : ''} ${p.exited ? 'exited' : ''}`;
 }
@@ -274,7 +381,7 @@ function renderPaneHead(p) {
 function renderPaneCtx(p) {
   const c = p.context;
   $('.ctx', p.el).innerHTML = c
-    ? `<span>context</span>${bar(c.pct)}<span title="context 深度：${c.tokens.toLocaleString()} / ${c.window.toLocaleString()} tokens">${c.pct.toFixed(0)}% · ${fmtTokens(c.tokens)} / ${fmtTokens(c.window)}</span>`
+    ? `<span>context</span>${bar(c.pct)}<span title="${esc(t('pane.contextTip', { used: c.tokens.toLocaleString(), total: c.window.toLocaleString() }))}">${c.pct.toFixed(0)}% · ${fmtTokens(c.tokens)} / ${fmtTokens(c.window)}</span>`
     : `<span>context –</span>`;
 }
 
@@ -286,9 +393,9 @@ function createPaneEl(p) {
         <span class="pane-idx"></span>
         <span class="tag kind"></span>
         <span class="pane-title"></span>
-        <button class="icon" data-act="menu" title="交接 / 換帳號 / 重新開啟">⇄</button>
-        <button class="icon" data-act="max" title="最大化 / 還原">⤢</button>
-        <button class="icon" data-act="close" title="關閉（session 紀錄會保留，可隨時再開）">✕</button>
+        <button class="icon" data-act="menu">⇄</button>
+        <button class="icon" data-act="max">⤢</button>
+        <button class="icon" data-act="close">✕</button>
       </div>
       <div class="pane-row meta">
         <div class="ctx"></div>
@@ -298,6 +405,7 @@ function createPaneEl(p) {
     <div class="pane-banner" hidden></div>
     <div class="term"></div>`;
   p.el = el;
+  localizePaneButtons(p);
   el.addEventListener('mousedown', () => setFocus(p));
   $('.pane-title', el).addEventListener('dblclick', () => startRename(p));
   el.querySelector('[data-act=close]').onclick = () => closePane(p);
@@ -309,12 +417,18 @@ function createPaneEl(p) {
   return el;
 }
 
+function localizePaneButtons(p) {
+  p.el.querySelector('[data-act=menu]').title = t('pane.menu');
+  p.el.querySelector('[data-act=max]').title = t('pane.max');
+  p.el.querySelector('[data-act=close]').title = t('pane.close');
+}
+
 function startRename(p) {
-  const t = $('.pane-title', p.el);
+  const titleEl = $('.pane-title', p.el);
   const input = document.createElement('input');
   input.value = paneTitle(p);
-  t.innerHTML = '';
-  t.appendChild(input);
+  titleEl.innerHTML = '';
+  titleEl.appendChild(input);
   input.focus();
   input.select();
   const done = (save) => {
@@ -322,7 +436,7 @@ function startRename(p) {
       p.name = input.value.trim();
       if (p.sessionId) api.setName(p.cwd, p.sessionId, p.name).then(refreshSessions);
     }
-    t.innerHTML = '';
+    titleEl.innerHTML = '';
     renderPaneHead(p);
   };
   input.onkeydown = (e) => {
@@ -385,7 +499,7 @@ async function startPty(p, { prompt } = {}) {
 async function spawnPane({ kind, sessionId = null, name = null, prompt = null, profileId = null, cwd = S.cwd }) {
   const w = workspaceFor(cwd);
   if (w.panes.length >= S.maxPanes) {
-    toast(`最多同時開 ${S.maxPanes} 個 session，請先關閉一個`, 'bad');
+    toast(t('err.E_MAX_PANES', { max: S.maxPanes }), 'bad');
     return null;
   }
   const p = { id: null, kind, cwd, sessionId, name, profileId: profileId || S.activeProfile, context: null, exited: false, max: false };
@@ -398,7 +512,7 @@ async function spawnPane({ kind, sessionId = null, name = null, prompt = null, p
   try {
     await startPty(p, { prompt });
   } catch (e) {
-    toast(`無法啟動 ${kindLabel(kind)}：${e.message}`, 'bad');
+    toast(t('spawn.failed', { kind: kindLabel(kind), msg: errMsg(e) }), 'bad');
     removePane(p);
     return null;
   }
@@ -422,7 +536,7 @@ async function restartPane(p, { kind = p.kind, sessionId = p.sessionId, profileI
   try {
     await startPty(p, { prompt });
   } catch (e) {
-    toast(`無法啟動：${e.message}`, 'bad');
+    toast(t('spawn.failed', { kind: kindLabel(p.kind), msg: errMsg(e) }), 'bad');
   }
   saveLayout(p.cwd);
   renderSessionList();
@@ -466,9 +580,13 @@ function otherProfileOptions(p) {
       const u = S.usage && S.usage.claude[x.id];
       const ok = u && u.ok;
       const exhausted = ok && ((u.fiveHour && u.fiveHour.pct >= 100) || (u.sevenDay && u.sevenDay.pct >= 100));
-      const note = ok ? `5h ${Math.round(u.fiveHour ? u.fiveHour.pct : 0)}% · 週 ${Math.round(u.sevenDay ? u.sevenDay.pct : 0)}%` : '額度未知';
+      const note = ok ? usageNote(u) : t('limit.unknown');
       return { profile: x, viable: !exhausted && (ok || (x.account && x.account.email)), note };
     });
+}
+
+function usageNote(u) {
+  return `${t('usage.5h')} ${Math.round(u.fiveHour ? u.fiveHour.pct : 0)}% · ${t('usage.week')} ${Math.round(u.sevenDay ? u.sevenDay.pct : 0)}%`;
 }
 
 function fallbackActions(p) {
@@ -478,13 +596,13 @@ function fallbackActions(p) {
       if (!o.viable) continue;
       acts.push({
         type: 'other-profile',
-        label: `改用「${o.profile.name}」續跑同一個 session（${o.note}）`,
+        label: t('limit.otherProfile', { name: profileName(o.profile), note: o.note }),
         run: () => switchProfile(p, o.profile.id),
       });
     }
-    acts.push({ type: 'codex', label: '交給 Codex 接手（自動產生交接文件）', run: () => handoff(p, 'codex', { inPlace: true, reason: 'Claude 額度用完' }) });
+    acts.push({ type: 'codex', label: t('limit.toCodex'), run: () => handoff(p, 'codex', { inPlace: true, reason: 'claude-limit' }) });
   } else if (p.kind === 'codex') {
-    acts.push({ type: 'claude', label: '交給 Claude 接手', run: () => handoff(p, 'claude', { inPlace: true, reason: 'Codex 額度用完' }) });
+    acts.push({ type: 'claude', label: t('limit.toClaude'), run: () => handoff(p, 'claude', { inPlace: true, reason: 'codex-limit' }) });
   }
   const order = S.settings.fallbackOrder || ['other-profile', 'codex'];
   return acts.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
@@ -501,12 +619,12 @@ function handleLimit(p, text) {
   if (S.settings.fallback === 'off') return;
   const acts = fallbackActions(p);
   if (S.settings.fallback === 'auto' && acts.length) {
-    toast(`「${paneTitle(p)}」額度用完，自動執行：${acts[0].label}`);
+    toast(t('limit.auto', { name: paneTitle(p), action: acts[0].label }));
     acts[0].run();
     return;
   }
   const b = $('.pane-banner', p.el);
-  b.innerHTML = `<span class="msg">⚠️ ${kindLabel(p.kind)} 額度似乎已用完。要怎麼接續？</span>`;
+  b.innerHTML = `<span class="msg">${esc(t('limit.banner', { kind: kindLabel(p.kind) }))}</span>`;
   for (const a of acts) {
     const btn = document.createElement('button');
     btn.textContent = a.label;
@@ -518,7 +636,7 @@ function handleLimit(p, text) {
   }
   const ig = document.createElement('button');
   ig.className = 'ghost';
-  ig.textContent = '忽略';
+  ig.textContent = t('limit.ignore');
   ig.onclick = () => {
     hideBanner(p);
     if (p.id) api.resetLimit(p.id);
@@ -529,25 +647,25 @@ function handleLimit(p, text) {
 
 async function switchProfile(p, profileId) {
   const target = profileOf(profileId);
-  if (!p.sessionId) return toast('這個窗格還沒有 session id，無法續跑', 'bad');
+  if (!p.sessionId) return toast(t('handoff.noId'), 'bad');
   if (target.id !== 'default' && !target.shareHistory) {
-    toast(`「${target.name}」沒有共用 session 歷史，改用交接文件開新 session`);
-    return handoff(p, 'claude', { inPlace: true, profileId, reason: '切換帳號' });
+    toast(t('switch.noHistory', { name: profileName(target) }));
+    return handoff(p, 'claude', { inPlace: true, profileId, reason: 'switch-profile' });
   }
-  toast(`以「${target.name}」繼續 ${paneTitle(p)}`, 'ok');
+  toast(t('switch.started', { name: profileName(target), title: paneTitle(p) }), 'ok');
   await restartPane(p, { profileId });
 }
 
-async function handoff(p, toKind, { inPlace = false, profileId = null, reason = '' } = {}) {
-  if (!p.sessionId) return toast('這個窗格還沒有 session id，無法交接', 'bad');
+async function handoff(p, toKind, { inPlace = false, profileId = null, reason = 'manual' } = {}) {
+  if (!p.sessionId) return toast(t('handoff.noId'), 'bad');
   let r;
   try {
-    r = await api.createHandoff({ paneId: p.id, fromKind: p.kind, toKind, sessionId: p.sessionId, cwd: p.cwd, sessionName: paneTitle(p), reason });
+    r = await api.createHandoff({ paneId: p.id, fromKind: p.kind, toKind, sessionId: p.sessionId, cwd: p.cwd, sessionName: paneTitle(p), reason, lang: S.lang });
   } catch (e) {
-    return toast(`交接失敗：${e.message}`, 'bad');
+    return toast(t('handoff.failed', { msg: errMsg(e) }), 'bad');
   }
   const name = `${paneTitle(p).replace(/ → (Claude|Codex)$/, '')} → ${kindLabel(toKind)}`;
-  toast(`已產生交接文件，${kindLabel(toKind)} 接手中…`, 'ok');
+  toast(t('handoff.started', { kind: kindLabel(toKind) }), 'ok');
   if (inPlace) await restartPane(p, { kind: toKind, sessionId: null, prompt: r.prompt, name, profileId: profileId || p.profileId });
   else await spawnPane({ kind: toKind, prompt: r.prompt, name, cwd: p.cwd, profileId });
 }
@@ -557,19 +675,19 @@ function paneMenu(p) {
   if (p.kind === 'claude') {
     for (const o of otherProfileOptions(p)) {
       items.push({
-        html: `以「${esc(o.profile.name)}」續跑 <span class="sub">${esc(o.note)}</span>`,
+        html: `${esc(t('pane.continueWith', { name: profileName(o.profile) }))} <span class="sub">${esc(o.note)}</span>`,
         onClick: () => switchProfile(p, o.profile.id),
       });
     }
-    items.push({ label: '交給 Codex 接手（新窗格）', onClick: () => handoff(p, 'codex', { reason: '手動交接' }) });
-    items.push({ label: '交給 Codex 接手（取代此窗格）', onClick: () => handoff(p, 'codex', { inPlace: true, reason: '手動交接' }) });
+    items.push({ label: t('pane.toCodexNew'), onClick: () => handoff(p, 'codex') });
+    items.push({ label: t('pane.toCodexHere'), onClick: () => handoff(p, 'codex', { inPlace: true }) });
   } else {
-    items.push({ label: '交給 Claude 接手（新窗格）', onClick: () => handoff(p, 'claude', { reason: '手動交接' }) });
-    items.push({ label: '交給 Claude 接手（取代此窗格）', onClick: () => handoff(p, 'claude', { inPlace: true, reason: '手動交接' }) });
+    items.push({ label: t('pane.toClaudeNew'), onClick: () => handoff(p, 'claude') });
+    items.push({ label: t('pane.toClaudeHere'), onClick: () => handoff(p, 'claude', { inPlace: true }) });
   }
   items.push('-');
-  items.push({ label: '↻ 重新開啟（resume）', onClick: () => restartPane(p) });
-  items.push({ label: '✎ 重新命名', onClick: () => startRename(p) });
+  items.push({ label: t('pane.restart'), onClick: () => restartPane(p) });
+  items.push({ label: t('pane.rename'), onClick: () => startRename(p) });
   return items;
 }
 
@@ -590,7 +708,7 @@ async function openProject(cwd, { restore = true } = {}) {
       const s = findSession(saved.kind, saved.sessionId);
       await spawnPane({ kind: saved.kind, sessionId: saved.sessionId, profileId: saved.profileId, name: s ? s.title : info.names[saved.sessionId], cwd });
     }
-    toast(`已還原 ${info.panes.length} 個 session`, 'ok');
+    toast(t('restore.done', { n: info.panes.length }), 'ok');
   }
   w.panes.forEach((p) => requestAnimationFrame(() => p.fit.fit()));
 }
@@ -606,7 +724,7 @@ async function refreshSessions() {
   for (const w of S.workspaces.values()) {
     for (const p of w.panes) {
       const s = p.cwd === S.cwd && p.sessionId && findSession(p.kind, p.sessionId);
-      if (s && s.title !== p.name) {
+      if (s && s.title && s.title !== p.name) {
         p.name = s.title;
         renderPaneHead(p);
       }
@@ -622,19 +740,21 @@ function renderSessionList() {
   $('#countCodex').textContent = S.sessions.codex.length || '';
   const q = S.search.toLowerCase();
   const items = (S.sessions[S.tab] || []).filter(
-    (s) => !q || `${s.title} ${s.firstPrompt || ''} ${s.lastPrompt || ''} ${s.id}`.toLowerCase().includes(q),
+    (s) => !q || `${s.title || ''} ${s.firstPrompt || ''} ${s.lastPrompt || ''} ${s.id}`.toLowerCase().includes(q),
   );
   list.innerHTML = items.length
     ? ''
-    : `<li class="s-meta" style="cursor:default">${S.cwd ? '這個專案還沒有 session' : '尚未選擇專案'}</li>`;
+    : `<li class="s-empty">${S.cwd ? t('side.noSessions') : t('side.noProject')}</li>`;
   for (const s of items) {
     const li = document.createElement('li');
     const open = openIds.has(s.id);
     li.className = open ? 'open' : '';
-    li.title = `${s.title}\n\n第一句：${s.firstPrompt || ''}\n最後：${s.lastPrompt || ''}\n\n${s.id}`;
+    li.title = `${sessionTitle(s)}\n\n${t('session.first')}: ${s.firstPrompt || ''}\n${t('session.last')}: ${s.lastPrompt || ''}\n\n${s.id}`;
     li.innerHTML = `
-      <div class="s-title"><span>${esc(s.title)}</span>${open ? '<i class="dot" title="開啟中"></i>' : ''}${s.spawnedByAgent ? '<span class="tag sub" title="由 Claude 透過 MCP 呼叫的 Codex 子 agent">子 agent</span>' : ''}</div>
-      <div class="s-meta"><span>${fmtAgo(s.mtime)}</span><span>· ${s.messageCount} 則</span>${
+      <div class="s-title"><span>${esc(sessionTitle(s))}</span>${open ? `<i class="dot" title="${esc(t('session.openNow'))}"></i>` : ''}${
+        s.spawnedByAgent ? `<span class="tag sub" title="${esc(t('session.subagentTip'))}">${esc(t('session.subagent'))}</span>` : ''
+      }</div>
+      <div class="s-meta"><span>${fmtAgo(s.mtime)}</span><span>· ${t('unit.messages', { n: s.messageCount })}</span>${
         s.context ? `<span>· ctx ${s.context.pct.toFixed(0)}%</span>` : ''
       }</div>
       <div class="s-prompt">${esc(s.lastPrompt || '')}</div>`;
@@ -642,18 +762,18 @@ function renderSessionList() {
     li.oncontextmenu = (e) => {
       e.preventDefault();
       showPopover(li, [
-        { label: '開啟', onClick: () => openSession(s) },
+        { label: t('list.open'), onClick: () => openSession(s) },
         {
-          label: '重新命名',
+          label: t('list.rename'),
           onClick: async () => {
-            const n = await promptModal('重新命名 session', { value: s.title });
+            const n = await promptModal(t('rename.session'), { value: sessionTitle(s) });
             if (n) {
               await api.setName(S.cwd, s.id, n);
               refreshSessions();
             }
           },
         },
-        { label: '複製 session id', onClick: () => api.clipboardWrite(s.id) },
+        { label: t('list.copyId'), onClick: () => api.clipboardWrite(s.id) },
       ]);
     };
     list.appendChild(li);
@@ -664,14 +784,14 @@ function openSession(s) {
   const w = ws();
   const existing = w && w.panes.find((p) => p.sessionId === s.id);
   if (existing) return setFocus(existing);
-  spawnPane({ kind: s.kind, sessionId: s.id, name: s.title });
+  spawnPane({ kind: s.kind, sessionId: s.id, name: s.title || null });
 }
 
 async function newSession(kind) {
   if (!S.cwd) return pickProject();
-  const name = await promptModal(`新增 ${kindLabel(kind)} session`, {
-    placeholder: '例如：API 重構、登入頁 bug…',
-    hint: '名稱會顯示在窗格上方，之後可雙擊標題修改。可留空。',
+  const name = await promptModal(t('new.title', { kind: kindLabel(kind) }), {
+    placeholder: t('new.placeholder'),
+    hint: t('new.hint'),
   });
   if (name === null) return;
   spawnPane({ kind, name: name || null });
@@ -686,10 +806,10 @@ async function showProjectMenu(anchor) {
   const projects = await api.listProjects();
   const items = projects.slice(0, 15).map((p) => ({
     active: p.cwd === S.cwd,
-    html: `<div><div>${esc(basename(p.cwd))}</div><div class="sub">${esc(p.cwd)}${p.sessionCount ? ` · ${p.sessionCount} sessions` : ''}</div></div>`,
+    html: `<div><div>${esc(basename(p.cwd))}</div><div class="sub">${esc(p.cwd)}${p.sessionCount ? ` · ${esc(t('project.sessions', { n: p.sessionCount }))}` : ''}</div></div>`,
     onClick: () => openProject(p.cwd),
   }));
-  items.push('-', { label: '📁 開啟其他資料夾…', onClick: pickProject });
+  items.push('-', { label: t('project.other'), onClick: pickProject });
   showPopover(anchor, items);
 }
 
@@ -698,7 +818,7 @@ async function renderRecent() {
   $('#recentList').innerHTML = '';
   for (const p of projects.slice(0, 8)) {
     const li = document.createElement('li');
-    li.innerHTML = `<b>${esc(basename(p.cwd))}</b> <span class="sub">${esc(p.cwd)}</span>`;
+    li.innerHTML = `<span class="r-name">${esc(basename(p.cwd))}</span><span class="sub">${esc(p.cwd)}</span>`;
     li.onclick = () => openProject(p.cwd);
     $('#recentList').appendChild(li);
   }
@@ -716,39 +836,39 @@ async function reloadProfiles() {
 function renderAccount() {
   const p = profileOf(S.activeProfile);
   $('#accountAvatar').textContent = initials(p);
-  $('#accountName').textContent = p.account && p.account.email ? `${p.name} · ${p.account.email}` : p.name;
+  $('#accountName').textContent = p.account && p.account.email ? `${profileName(p)} · ${p.account.email}` : profileName(p);
 }
 
 function showAccountMenu(anchor) {
   const items = S.profiles.map((p) => {
     const u = S.usage && S.usage.claude[p.id];
-    const note = u && u.ok ? `5h ${Math.round(u.fiveHour ? u.fiveHour.pct : 0)}% · 週 ${Math.round(u.sevenDay ? u.sevenDay.pct : 0)}%` : u ? u.reason : '';
+    const note = u && u.ok ? usageNote(u) : u && u.reason !== 'no-credentials' ? t(`usage.reason.${u.reason}`) : '';
     return {
       active: p.id === S.activeProfile,
-      html: `<span class="avatar">${esc(initials(p))}</span><div style="flex:1"><div>${esc(p.name)}${p.id === S.activeProfile ? ' ✓' : ''}</div><div class="sub">${esc(
-        (p.account && p.account.email) || '未登入',
+      html: `<span class="avatar">${esc(initials(p))}</span><div style="flex:1"><div>${esc(profileName(p))}${p.id === S.activeProfile ? ' ✓' : ''}</div><div class="sub">${esc(
+        (p.account && p.account.email) || t('profile.notLoggedIn'),
       )}${note ? ` · ${esc(note)}` : ''}</div></div>`,
       onClick: async () => {
         await api.setActiveProfile(p.id);
         await reloadProfiles();
         refreshSessions();
         renderMeters();
-        toast(`之後新開的 session 會使用「${p.name}」`, 'ok');
+        toast(t('profile.switched', { name: profileName(p) }), 'ok');
       },
     };
   });
   const cur = profileOf(S.activeProfile);
   items.push(
     '-',
-    { label: `🔑 登入 / 重新登入「${cur.name}」`, onClick: () => loginModal(cur) },
-    { label: '＋ 新增帳號', onClick: addProfileFlow },
-    { label: `✎ 重新命名「${cur.name}」`, onClick: renameProfileFlow },
+    { label: t('profile.login', { name: profileName(cur) }), onClick: () => loginModal(cur) },
+    { label: t('profile.add'), onClick: addProfileFlow },
+    { label: t('profile.rename', { name: profileName(cur) }), onClick: renameProfileFlow },
   );
-  if (cur.id !== 'default') items.push({ label: `🗑 移除「${cur.name}」`, onClick: removeProfileFlow });
+  if (cur.id !== 'default') items.push({ label: t('profile.remove', { name: profileName(cur) }), onClick: removeProfileFlow });
   items.push(
     '-',
-    { label: '🧩 讓 Claude 可以呼叫 Codex（安裝 Codex MCP）', onClick: installMcp },
-    { label: '🔑 Codex 登入', onClick: () => loginModal(cur, 'codex-login') },
+    { label: t('profile.installMcp'), onClick: installMcp },
+    { label: t('profile.codexLogin'), onClick: () => loginModal(cur, 'codex-login') },
   );
   showPopover(anchor, items);
 }
@@ -756,10 +876,10 @@ function showAccountMenu(anchor) {
 // 在 modal 裡開一個小終端機跑 `claude auth login`（或 `codex login`），完成後自動關閉
 function loginModal(profile, kind = 'login') {
   return modal(
-    `<h3>${kind === 'login' ? '登入 Claude' : '登入 Codex'}：${esc(profile.name)}</h3>
-     <div class="hint">瀏覽器會開啟授權頁面，完成後這裡會自動關閉。</div>
-     <div id="loginTerm" style="height:260px;margin-top:10px;background:#000;border-radius:6px;padding:4px"></div>
-     <div class="actions"><button id="mClose">關閉</button></div>`,
+    `<h3>${esc(t(kind === 'login' ? 'login.claude' : 'login.codex', { name: profileName(profile) }))}</h3>
+     <div class="hint">${esc(t('login.hint'))}</div>
+     <div id="loginTerm" class="login-term"></div>
+     <div class="actions"><button id="mClose">${esc(t('modal.close'))}</button></div>`,
     async (card, close) => {
       const holder = { id: null, onExit: null };
       const t = makeTerminal($('#loginTerm', card), () => holder.id);
@@ -777,7 +897,7 @@ function loginModal(profile, kind = 'login') {
       $('#mClose', card).onclick = finish;
       Object.assign(holder, t, {
         onExit: (code) => {
-          toast(code === 0 ? '登入完成' : `登入程序結束 (exit ${code})`, code === 0 ? 'ok' : 'bad');
+          toast(code === 0 ? t('login.done') : t('login.exit', { code }), code === 0 ? 'ok' : 'bad');
           finish();
         },
       });
@@ -788,7 +908,7 @@ function loginModal(profile, kind = 'login') {
         paneByPty.set(r.paneId, holder);
         t.term.focus();
       } catch (e) {
-        toast(`無法啟動登入：${e.message}`, 'bad');
+        toast(t('login.failed', { msg: errMsg(e) }), 'bad');
       }
     },
   );
@@ -796,16 +916,16 @@ function loginModal(profile, kind = 'login') {
 
 async function addProfileFlow() {
   const res = await modal(
-    `<h3>新增帳號</h3>
-     <div class="field"><label>名稱</label><input id="pName" placeholder="例如：公司帳號 / 備用 Max" /></div>
-     <label class="field check"><input type="checkbox" id="pShare" checked /> 共用 session 歷史與設定（建議：才能用另一個帳號 resume 同一個 session）</label>
-     <label class="field check"><input type="checkbox" id="pCodex" /> 這個帳號也使用獨立的 Codex 登入（CODEX_HOME）</label>
-     <div class="actions"><button id="mCancel">取消</button><button id="mOk" class="primary">建立並登入</button></div>`,
+    `<h3>${esc(t('add.title'))}</h3>
+     <div class="field"><label>${esc(t('add.name'))}</label><input id="pName" placeholder="${esc(t('add.namePlaceholder'))}" /></div>
+     <label class="field check"><input type="checkbox" id="pShare" checked /> ${esc(t('add.share'))}</label>
+     <label class="field check"><input type="checkbox" id="pCodex" /> ${esc(t('add.codex'))}</label>
+     <div class="actions"><button id="mCancel">${esc(t('modal.cancel'))}</button><button id="mOk" class="primary">${esc(t('add.submit'))}</button></div>`,
     (card, close) => {
       $('#pName', card).focus();
       $('#mCancel', card).onclick = () => close(null);
       $('#mOk', card).onclick = () =>
-        close({ name: $('#pName', card).value.trim() || '新帳號', shareHistory: $('#pShare', card).checked, separateCodex: $('#pCodex', card).checked });
+        close({ name: $('#pName', card).value.trim() || t('add.defaultName'), shareHistory: $('#pShare', card).checked, separateCodex: $('#pCodex', card).checked });
     },
   );
   if (!res) return;
@@ -816,7 +936,7 @@ async function addProfileFlow() {
 
 async function renameProfileFlow() {
   const cur = profileOf(S.activeProfile);
-  const n = await promptModal('重新命名帳號', { value: cur.name });
+  const n = await promptModal(t('rename.profile'), { value: profileName(cur) });
   if (n) {
     await api.renameProfile(cur.id, n);
     reloadProfiles();
@@ -826,8 +946,8 @@ async function renameProfileFlow() {
 async function removeProfileFlow() {
   const cur = profileOf(S.activeProfile);
   const ok = await modal(
-    `<h3>移除「${esc(cur.name)}」？</h3><div class="hint">只會從清單移除，不會刪除該帳號的設定目錄。</div>
-     <div class="actions"><button id="mCancel">取消</button><button id="mOk" class="primary">移除</button></div>`,
+    `<h3>${esc(t('remove.title', { name: profileName(cur) }))}</h3><div class="hint">${esc(t('remove.hint'))}</div>
+     <div class="actions"><button id="mCancel">${esc(t('modal.cancel'))}</button><button id="mOk" class="primary">${esc(t('remove.submit'))}</button></div>`,
     (card, close) => {
       $('#mCancel', card).onclick = () => close(false);
       $('#mOk', card).onclick = () => close(true);
@@ -839,9 +959,9 @@ async function removeProfileFlow() {
 }
 
 async function installMcp() {
-  toast('正在註冊 codex mcp-server…');
+  toast(t('mcp.running'));
   const r = await api.installCodexMcp(S.activeProfile);
-  toast(r.ok ? `已安裝：之後新開的 Claude session 可以直接呼叫 Codex 工具。\n${r.output}` : `安裝失敗：\n${r.output}`, r.ok ? 'ok' : 'bad', 9000);
+  toast(r.ok ? t('mcp.ok', { out: r.output }) : t('mcp.failed', { out: r.output }), r.ok ? 'ok' : 'bad', 9000);
 }
 
 // ---------------------------------------------------------------- usage & context dashboard
@@ -863,8 +983,9 @@ async function refreshUsage(force = false) {
         return p.id !== S.activeProfile && x && x.ok && (!x.fiveHour || x.fiveHour.pct < 100);
       });
       toast(
-        `「${profileOf(S.activeProfile).name}」5 小時額度已用完，${fmtReset(u.fiveHour.resetsAt)}後重置。` +
-          (alt ? `\n可從右上帳號選單切到「${alt.name}」，或在窗格 ⇄ 選單換帳號續跑。` : '\n可在窗格 ⇄ 選單把工作交給 Codex。'),
+        t('limit.toast', { name: profileName(profileOf(S.activeProfile)), t: fmtReset(u.fiveHour.resetsAt) }) +
+          '\n' +
+          (alt ? t('limit.toastAlt', { alt: profileName(alt) }) : t('limit.toastCodex')),
         'bad',
         12000,
       );
@@ -874,15 +995,15 @@ async function refreshUsage(force = false) {
 
 function meter(label, w) {
   if (!w || w.pct == null) return '';
-  return `<div class="meter" title="${label}：${w.pct.toFixed(1)}%${w.resetsAt ? `，${fmtReset(w.resetsAt)}後重置` : ''}">${label} ${bar(w.pct)}<b>${Math.round(
-    w.pct,
-  )}%</b></div>`;
+  const tip = `${label} ${w.pct.toFixed(1)}%${fmtReset(w.resetsAt) ? ` · ${t('reset.in', { t: fmtReset(w.resetsAt) })}` : ''}`;
+  return `<div class="meter" title="${esc(tip)}">${label} ${bar(w.pct)}<b>${Math.round(w.pct)}%</b></div>`;
 }
 
 function codexWindows(rl) {
   if (!rl) return [];
   return [rl.primary, rl.secondary].filter(Boolean).map((w) => ({
-    label: w.windowMinutes && w.windowMinutes > 1440 ? '週' : w.windowMinutes ? `${Math.round(w.windowMinutes / 60)}h` : '?',
+    week: !!(w.windowMinutes && w.windowMinutes > 1440),
+    label: w.windowMinutes && w.windowMinutes > 1440 ? t('usage.week') : w.windowMinutes ? `${Math.round(w.windowMinutes / 60)}h` : '?',
     ...w,
   }));
 }
@@ -891,10 +1012,10 @@ function renderMeters() {
   if (!S.usage) return;
   const u = S.usage.claude[S.activeProfile];
   let html = '<div class="meter-group"><span class="tag claude">Claude</span>';
-  html += u && u.ok ? meter('5h', u.fiveHour) + meter('週', u.sevenDay) : `<span class="meter">${esc(u ? u.reason : '載入中…')}</span>`;
+  html += u && u.ok ? meter(t('usage.5h'), u.fiveHour) + meter(t('usage.week'), u.sevenDay) : `<span class="meter">${esc(u ? t(`usage.reason.${u.reason}`) : t('usage.loading'))}</span>`;
   html += '</div><div class="meter-group"><span class="tag codex">Codex</span>';
   const cw = codexWindows(S.usage.codex);
-  html += cw.length ? cw.map((w) => meter(w.label, w)).join('') : '<span class="meter">尚無資料</span>';
+  html += cw.length ? cw.map((w) => meter(w.label, w)).join('') : `<span class="meter">${esc(t('usage.noData'))}</span>`;
   html += '</div>';
   $('#meters').innerHTML = html;
 }
@@ -902,7 +1023,7 @@ function renderMeters() {
 function usageRow(label, w) {
   if (!w || w.pct == null) return '';
   return `<div class="row"><span class="label">${label}</span>${bar(w.pct)}<span class="val">${Math.round(w.pct)}%</span><span class="reset">${
-    w.resetsAt ? `${fmtReset(w.resetsAt)}後重置` : ''
+    fmtReset(w.resetsAt) ? esc(t('reset.in', { t: fmtReset(w.resetsAt) })) : ''
   }</span></div>`;
 }
 
@@ -911,29 +1032,31 @@ function renderDashboard() {
   let html = '';
   for (const p of S.profiles) {
     const u = S.usage && S.usage.claude[p.id];
-    html += `<div class="card"><div class="head"><span class="tag claude">Claude</span>${esc(p.name)}${p.id === S.activeProfile ? ' ✓' : ''}</div>
-      <div class="sub">${esc((p.account && p.account.email) || '未登入')}${u && u.plan ? ` · ${esc(u.plan)}` : ''}</div>`;
-    if (u && u.ok) html += usageRow('5 小時', u.fiveHour) + usageRow('每週', u.sevenDay) + usageRow('週 Opus', u.sevenDayOpus) + usageRow('週 Sonnet', u.sevenDaySonnet);
-    else html += `<div class="sub">${esc(u ? u.reason : '載入中…')}</div>`;
+    html += `<div class="card"><div class="head"><span class="tag claude">Claude</span>${esc(profileName(p))}${p.id === S.activeProfile ? ' ✓' : ''}</div>
+      <div class="sub">${esc((p.account && p.account.email) || t('profile.notLoggedIn'))}${u && u.plan ? ` · ${esc(u.plan)}` : ''}</div>`;
+    if (u && u.ok)
+      html +=
+        usageRow(t('usage.5hLong'), u.fiveHour) + usageRow(t('usage.weekLong'), u.sevenDay) + usageRow(t('usage.weekOpus'), u.sevenDayOpus) + usageRow(t('usage.weekSonnet'), u.sevenDaySonnet);
+    else if (!u || u.reason !== 'no-credentials') html += `<div class="sub">${esc(u ? t(`usage.reason.${u.reason}`) : t('usage.loading'))}</div>`;
     html += '</div>';
   }
   const cw = codexWindows(S.usage && S.usage.codex);
-  html += `<div class="card"><div class="head"><span class="tag codex">Codex</span>ChatGPT 訂閱</div>`;
+  html += `<div class="card"><div class="head"><span class="tag codex">Codex</span>${esc(t('usage.codexPlan'))}</div>`;
   html += cw.length
-    ? cw.map((w) => usageRow(w.label === '週' ? '每週' : w.label === '5h' ? '5 小時' : w.label, w)).join('') +
-      `<div class="sub">資料時間：${S.usage.codex.observedAt ? fmtAgo(S.usage.codex.observedAt) : '–'}（Codex 每次回覆時更新）</div>`
-    : '<div class="sub">尚無資料：使用過 Codex 後就會出現</div>';
-  html += `</div><button id="refreshUsage">↻ 重新整理額度</button>`;
+    ? cw.map((w) => usageRow(w.week ? t('usage.weekLong') : w.label === '5h' ? t('usage.5hLong') : w.label, w)).join('') +
+      `<div class="sub">${esc(t('usage.codexAt', { t: S.usage.codex.observedAt ? fmtAgo(S.usage.codex.observedAt) : '–' }))}</div>`
+    : `<div class="sub">${esc(t('usage.codexEmpty'))}</div>`;
+  html += `</div><button id="refreshUsage" class="ghost">${esc(t('usage.refresh'))}</button>`;
   $('#dashUsage').innerHTML = html;
   $('#refreshUsage').onclick = () => refreshUsage(true);
 
   let ctx = '';
   for (const [cwd, w] of S.workspaces) {
     if (!w.panes.length) continue;
-    ctx += `<div class="sub" style="margin:6px 0">${esc(basename(cwd))}</div>`;
+    ctx += `<div class="sub group">${esc(basename(cwd))}</div>`;
     for (const p of w.panes) {
       const c = p.context;
-      ctx += `<div class="card"><div class="head"><span class="tag ${p.kind}">${kindLabel(p.kind)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(
+      ctx += `<div class="card"><div class="head"><span class="tag ${p.kind}">${kindLabel(p.kind)}</span><span class="ellipsis">${esc(
         paneTitle(p),
       )}</span></div>
         <div class="row">${bar(c ? c.pct : 0)}<span class="val">${c ? Math.round(c.pct) + '%' : '–'}</span><span class="reset">${
@@ -941,27 +1064,70 @@ function renderDashboard() {
       }</span></div></div>`;
     }
   }
-  $('#dashContext').innerHTML = ctx || '<div class="sub">沒有開啟中的 session</div>';
+  $('#dashContext').innerHTML = ctx || `<div class="sub">${esc(t('dash.noOpen'))}</div>`;
 
+  renderSettings();
+}
+
+function opt(value, label, current) {
+  return `<option value="${esc(value)}" ${String(current) === String(value) ? 'selected' : ''}>${esc(label)}</option>`;
+}
+
+function renderSettings() {
   const st = S.settings;
+  $('#dashAppearance').innerHTML = `
+    <label>${esc(t('set.theme'))}<select id="setTheme">${Object.entries(THEMES)
+      .map(([id, th]) => opt(id, th.label[S.lang] || th.label.en, st.theme || 'terminal'))
+      .join('')}</select></label>
+    <label>${esc(t('set.lang'))}<select id="setLang">${opt('en', I18N.en['lang.name'], S.lang)}${opt('zh-Hant', I18N['zh-Hant']['lang.name'], S.lang)}</select></label>
+    <label>${esc(t('set.fontSize'))}<select id="setFontSize">${[11, 12, 13, 14, 15, 16].map((n) => opt(n, `${n}px`, st.fontSize || 13)).join('')}</select></label>
+    <label>${esc(t('set.font'))}<input id="setFont" value="${esc(st.fontFamily || '')}" placeholder="${esc(t('set.fontPlaceholder'))}" /></label>
+    <label title="${esc(t('set.termColorsHint'))}">${esc(t('set.termColors'))}<select id="setTermColors">${opt('muted', t('set.termColors.muted'), st.termColors || 'muted')}${opt(
+      'full',
+      t('set.termColors.full'),
+      st.termColors || 'muted',
+    )}</select></label>`;
   $('#dashSettings').innerHTML = `
-    <label>開機自動啟動 <input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''} ${S.platform === 'linux' ? 'disabled' : ''}></label>
-    <label>還原上次的 session <input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
-    <label>額度用完
-      <select id="setFallback">
-        <option value="ask" ${st.fallback === 'ask' ? 'selected' : ''}>詢問我</option>
-        <option value="auto" ${st.fallback === 'auto' ? 'selected' : ''}>自動接手</option>
-        <option value="off" ${st.fallback === 'off' ? 'selected' : ''}>不處理</option>
-      </select></label>
-    <label>優先順序
-      <select id="setOrder">
-        <option value="other-profile,codex" ${String(st.fallbackOrder) === 'other-profile,codex' ? 'selected' : ''}>換帳號 → Codex</option>
-        <option value="codex,other-profile" ${String(st.fallbackOrder) === 'codex,other-profile' ? 'selected' : ''}>Codex 優先</option>
-      </select></label>`;
+    <label>${esc(t('set.openAtLogin'))}<input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''} ${S.platform === 'linux' ? 'disabled' : ''}></label>
+    <label>${esc(t('set.restore'))}<input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
+    <label>${esc(t('set.fallback'))}<select id="setFallback">${opt('ask', t('set.fallback.ask'), st.fallback)}${opt('auto', t('set.fallback.auto'), st.fallback)}${opt(
+      'off',
+      t('set.fallback.off'),
+      st.fallback,
+    )}</select></label>
+    <label>${esc(t('set.order'))}<select id="setOrder">${opt('other-profile,codex', t('set.order.profileFirst'), st.fallbackOrder)}${opt(
+      'codex,other-profile',
+      t('set.order.codexFirst'),
+      st.fallbackOrder,
+    )}</select></label>`;
+  $('#setTheme').onchange = async (e) => {
+    await saveSettings({ theme: e.target.value, windowBg: THEMES[e.target.value].ui.bg });
+    applyTheme();
+  };
+  $('#setLang').onchange = (e) => setLang(e.target.value);
+  $('#setFontSize').onchange = async (e) => {
+    await saveSettings({ fontSize: Number(e.target.value) });
+    applyTheme();
+  };
+  $('#setFont').onchange = async (e) => {
+    await saveSettings({ fontFamily: e.target.value.trim() });
+    applyTheme();
+  };
+  $('#setTermColors').onchange = async (e) => {
+    await saveSettings({ termColors: e.target.value });
+    applyTheme();
+    toast(t('set.termColorsHint'));
+  };
   $('#setLogin').onchange = (e) => saveSettings({ openAtLogin: e.target.checked });
   $('#setRestore').onchange = (e) => saveSettings({ autoRestore: e.target.checked });
   $('#setFallback').onchange = (e) => saveSettings({ fallback: e.target.value });
   $('#setOrder').onchange = (e) => saveSettings({ fallbackOrder: e.target.value.split(',') });
+}
+
+async function setLang(lang) {
+  S.lang = lang;
+  await saveSettings({ lang });
+  applyLang();
 }
 
 async function saveSettings(patch) {
@@ -991,7 +1157,10 @@ async function boot() {
     activeProfile: init.activeProfile,
     settings: init.settings,
   });
-  renderAccount();
+  S.lang = init.settings.lang || detectLang();
+  applyTheme();
+  applyLang();
+  $('#langBtn').onclick = () => setLang(S.lang === 'en' ? 'zh-Hant' : 'en');
 
   $('#projectBtn').onclick = (e) => {
     e.stopPropagation();

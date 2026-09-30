@@ -17,6 +17,11 @@ const DEFAULTS = {
     fallback: 'ask', // 'off' | 'ask' | 'auto'：額度用完時的處理方式
     fallbackOrder: ['other-profile', 'codex'], // 先換 Claude 帳號，再交給 Codex
     usageRefreshSec: 120,
+    theme: 'terminal', // 見 src/renderer/themes.js
+    lang: null, // null：依系統語言
+    fontSize: 13,
+    termColors: 'muted', // 'muted'：終端機輸出也套用低飽和色盤；'full'：保留程式原本的全彩
+    fontFamily: '', // 空字串：用系統終端機預設字型
   },
 };
 

@@ -8,7 +8,7 @@ let pty; // 延遲載入原生模組，讓純邏輯部分可以在沒編譯 node
 const LIMIT_PATTERNS = [
   /usage limit reached/i,
   /(5-hour|five-hour|weekly|session) limit (reached|hit)/i,
-  /you(?:'|’)ve (hit|reached) your (usage )?limit/i,
+  /(?:you(?:'|’)ve|you have) (hit|reached) your (usage )?limit/i,
   /limit will reset at/i,
   /rate_limit_error/i,
 ];
@@ -35,6 +35,13 @@ function commandFor(cmd, args, { interactive = true } = {}) {
   return { file: shell, args: interactive ? ['-l', '-i', '-c', line] : ['-l', '-c', line] };
 }
 
+// 值為 null 的變數會被移除（例如移除 COLORTERM，讓 CLI 改用 256 色，才能被主題的柔和色盤接管）
+function buildEnv(extra) {
+  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extra };
+  for (const k of Object.keys(env)) if (env[k] == null) delete env[k];
+  return env;
+}
+
 class PtyManager {
   constructor(send) {
     this.send = send; // (channel, ...args) => void
@@ -49,7 +56,7 @@ class PtyManager {
       cols,
       rows,
       cwd: cwd || os.homedir(),
-      env: { ...process.env, ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+      env: buildEnv(env),
     });
     const rec = { pty: p, buf: '', timer: null, tail: '', limitNotified: false };
     this.ptys.set(id, rec);
@@ -117,4 +124,4 @@ class PtyManager {
   }
 }
 
-module.exports = { PtyManager, LIMIT_PATTERNS, ANSI, commandFor };
+module.exports = { PtyManager, LIMIT_PATTERNS, ANSI, commandFor, buildEnv };
