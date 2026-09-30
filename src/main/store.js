@@ -22,7 +22,7 @@ const DEFAULTS = {
     fontSize: 13,
     fontFamily: '', // 空字串：用系統終端機預設字型
     sidebarPinned: false, // false：側欄不用時收成窄條，滑鼠移上來才展開
-    bridgeConfirm: true, // 窗格互通：訊息先放進對方輸入框，等使用者按 Enter
+    bridgeConfirm: false, // 窗格互通：true 時訊息先停在對方輸入框，等使用者按 Enter
   },
 };
 
@@ -36,6 +36,14 @@ class Store {
     } catch {}
     this.data = { ...structuredClone(DEFAULTS), ...data, settings: { ...DEFAULTS.settings, ...(data.settings || {}) } };
     if (!this.data.profiles.some((p) => p.id === 'default')) this.data.profiles.unshift(defaultProfile());
+    this.migrate();
+  }
+
+  // 設定格式升級：預設值改變時，舊檔裡存著的舊預設值也一起更新（只做一次）
+  migrate() {
+    const v = this.data.settingsVersion || 1;
+    if (v < 2) this.data.settings.bridgeConfirm = false; // 窗格訊息改成預設不用確認
+    this.data.settingsVersion = 2;
   }
 
   save() {

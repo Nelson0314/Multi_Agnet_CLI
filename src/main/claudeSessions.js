@@ -158,7 +158,15 @@ function isRealPrompt(text) {
   return !/^<(command-|local-command|system-reminder|bash-|user-prompt-submit-hook)/.test(t) && !t.startsWith('Caveat:');
 }
 
+// Claude 透過 statusline 回報過的 context window 大小（依模型），比猜測準確
+let knownWindows = {};
+function setKnownWindows(map) {
+  knownWindows = map || {};
+}
+
 function contextWindowFor(model, tokens) {
+  const known = model && knownWindows[model];
+  if (known && known >= tokens) return known;
   if (model && /\[1m\]|-1m\b/i.test(model)) return LARGE_WINDOW;
   return tokens > DEFAULT_WINDOW ? LARGE_WINDOW : DEFAULT_WINDOW;
 }
@@ -301,6 +309,7 @@ module.exports = {
   projectsRoot,
   encodeProjectPath,
   findProjectDir,
+  setKnownWindows,
   relatedDirs,
   isInside,
   listProjects,

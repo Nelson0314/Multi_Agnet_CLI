@@ -63,7 +63,10 @@ function contextFromEntries(entries) {
   for (let i = entries.length - 1; i >= 0; i--) {
     const tc = tokenCountOf(entries[i]);
     if (tc && tc.info && tc.info.last_token_usage) {
-      const tokens = tc.info.last_token_usage.input_tokens || 0;
+      // 跟 Codex 自己的算法一致：最後一輪的 total_tokens 扣掉 reasoning tokens
+      const u = tc.info.last_token_usage;
+      const total = u.total_tokens != null ? u.total_tokens : (u.input_tokens || 0) + (u.output_tokens || 0);
+      const tokens = Math.max(0, total - (u.reasoning_output_tokens || 0));
       const window = tc.info.model_context_window || 272_000;
       return { tokens, window, pct: Math.min(100, (tokens / window) * 100), model: null };
     }

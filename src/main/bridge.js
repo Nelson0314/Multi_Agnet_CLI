@@ -118,6 +118,11 @@ class Bridge {
   async call(method, params, fromId) {
     const from = this.panes.get(fromId);
     if (!from) throw new Error('This tool only works inside a Multi-Agent CLI pane.');
+    // Claude 的 statusline 回報（session id、context、額度），不需要窗格清單
+    if (method === 'status') {
+      if (this.onStatus) this.onStatus(fromId, params);
+      return 'ok';
+    }
     const list = await this.askRenderer('listPanes', { cwd: from.cwd });
     const resolve = (ref) => {
       const hit = list.find((p) => String(p.index) === String(ref) || p.paneId === ref);

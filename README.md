@@ -114,21 +114,25 @@ Codex 當子 agent：帳號選單的「讓 Claude 可以呼叫 Codex」會執行
 
 ## 窗格之間對話
 
-帳號選單的「讓窗格之間可以對話」會把一個 MCP server 同時裝到 Claude（`claude mcp add`）與 Codex（`~/.codex/config.toml`）。之後開的窗格裡，agent 多了四個工具：
+每個 Claude 窗格啟動時會自動帶上一組 MCP 工具，並附上一段說明，讓 Claude 知道自己在多窗格環境裡，要跟其他窗格溝通時該用這些工具，而不是自己另開一個 `codex` 程序。不需要安裝。Codex 窗格要用的話，在帳號選單按一次「讓 Codex 窗格也能跟其他窗格對話」。
 
 | 工具 | 用途 |
 | --- | --- |
 | `list_panes` | 列出目前專案的窗格編號、類型、名稱 |
-| `send_to_pane` | 把訊息送進另一個窗格的輸入框 |
+| `send_to_pane` | 把訊息送進另一個窗格 |
 | `read_pane` | 讀另一個窗格最新的回覆；PowerShell 窗格則讀最後幾行畫面 |
 | `wait_for_reply` | 等 Claude 或 Codex 窗格回覆完，再把回覆交回來 |
 
 例如在 Claude 窗格說「請窗格 3 的 Codex review 我剛改的 src/api.ts，等它回覆後整理重點」，Claude 會自己呼叫這些工具，兩邊的對話都在你眼前。
 
 - 訊息開頭會標示來源，例如 `[from pane 2 · Claude · API 重構]`。
-- 預設訊息只會放進對方的輸入框，由你按 Enter 才送出，可以在設定的「窗格訊息先確認」關掉。關掉後會等對方畫面安靜 2 秒才送。
+- 預設直接送出，送之前會等對方畫面安靜 2 秒。想先檢查再送，打開設定的「窗格訊息先確認」，訊息會停在對方輸入框等你按 Enter。
 - 同一對窗格 10 分鐘內最多傳 12 則，避免兩個 agent 無限互相呼叫。
 - 連線只綁本機，token 只給這個程式開的窗格。
+
+## Context 與額度的來源
+
+Claude 窗格會透過 Claude Code 的 statusline 把它自己算的 context 用量、context window 大小與 5 小時／每週額度回報給這個程式，所以窗格上方和儀表板的數字跟 Claude 畫面上的一致；在 Claude 裡 `/clear` 之後也會跟上新的 session。你原本如果有設定自己的 statusline，會照樣執行、照樣顯示。還沒收到回報時（例如剛開啟），改從 session 紀錄檔計算。
 
 ## Session 名稱
 

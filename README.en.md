@@ -110,21 +110,25 @@ In the dashboard settings you can choose Ask, Hand off automatically or Do nothi
 
 ## Panes talking to each other
 
-"Let panes talk to each other" in the account menu installs an MCP server for both Claude (`claude mcp add`) and Codex (`~/.codex/config.toml`). Panes opened afterwards get four tools:
+Every Claude pane starts with a set of MCP tools and a short note telling Claude it runs next to other panes and should use these tools to reach them, instead of starting its own `codex` process. Nothing to install. For Codex panes, click "Let Codex panes talk to other panes" in the account menu once.
 
 | Tool | What it does |
 | --- | --- |
 | `list_panes` | Pane numbers, kinds and names in the current project |
-| `send_to_pane` | Put a message into another pane's input |
+| `send_to_pane` | Send a message to another pane |
 | `read_pane` | Read another pane's latest reply, or the last screen lines of a shell pane |
 | `wait_for_reply` | Wait until a Claude or Codex pane finishes answering and return the reply |
 
 For example, tell the Claude pane "ask the Codex in pane 3 to review src/api.ts and summarize its reply". Claude calls the tools itself, and both sides of the conversation stay on screen.
 
 - Messages start with their source, such as `[from pane 2 · Claude · API refactor]`.
-- By default a message waits in the other pane's input until you press Enter. Turn off "Confirm pane messages" to send directly; the app then waits for 2 quiet seconds on the target first.
+- Messages are sent directly after the target has been quiet for 2 seconds. Turn on "Confirm pane messages" to have them wait in the target's input until you press Enter.
 - At most 12 messages between the same two panes in 10 minutes, so two agents cannot loop forever.
 - The server listens on localhost only, and its token is given only to panes opened by the app.
+
+## Where context and usage numbers come from
+
+Claude panes report Claude Code's own numbers through its statusline: context used, context window size, and 5-hour and weekly usage. The pane header and dashboard therefore match what Claude shows, and they follow the new session after `/clear`. If you already have your own statusline, it still runs and shows. Until the first report arrives, the numbers are computed from the session transcript.
 
 ## Session names
 

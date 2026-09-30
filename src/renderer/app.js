@@ -1202,7 +1202,7 @@ async function saveSettings(patch) {
 async function pollContext() {
   const all = [...S.workspaces.values()].flatMap((w) => w.panes).filter((p) => p.sessionId);
   if (!all.length) return;
-  const res = await api.getContext(all.map((p) => ({ kind: p.kind, sessionId: p.sessionId, cwd: p.cwd, profileId: p.profileId })));
+  const res = await api.getContext(all.map((p) => ({ kind: p.kind, sessionId: p.sessionId, cwd: p.cwd, profileId: p.profileId, paneId: p.id })));
   for (const p of all) {
     if (res[p.sessionId] !== undefined) {
       p.context = res[p.sessionId];
