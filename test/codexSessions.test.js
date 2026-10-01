@@ -64,3 +64,56 @@ test('findNewSession 找出新開的 session', () => {
   assert.strictEqual(cx.findNewSession('/proj', since, new Set(), home), 'new1');
   assert.strictEqual(cx.findNewSession('/proj', since, new Set(['new1']), home), null);
 });
+
+// Codex 0.159 的實際格式：對話訊息改成 item_completed（UserMessage / AgentMessage），不再寫 user_message / agent_message
+function newFormatRollout(home, id, cwd, { dup = false } = {}) {
+  const ts = '2026-10-01T17:35:53.580Z';
+  const f = path.join(home, 'sessions', '2026', '10', '01', `rollout-2026-10-01T17-35-53-${id}.jsonl`);
+  const entries = [
+    { timestamp: ts, ordinal: 0, type: 'session_meta', payload: { session_id: id, id, timestamp: ts, cwd, originator: 'codex-tui', cli_version: '0.159.3', source: 'cli' } },
+    { timestamp: ts, ordinal: 1, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1', model_context_window: 258400 } },
+    { timestamp: ts, ordinal: 2, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>\n  <cwd>/p</cwd>\n</environment_context>' }] } },
+    { timestamp: ts, ordinal: 3, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '請幫我看一下登入流程' }] } },
+    { timestamp: ts, ordinal: 4, type: 'event_msg', payload: { type: 'item_completed', thread_id: id, turn_id: 't1', item: { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: '請幫我看一下登入流程', text_elements: [] }] } } },
+    ...(dup ? [{ timestamp: ts, type: 'event_msg', payload: { type: 'user_message', message: '請幫我看一下登入流程' } }] : []),
+    { timestamp: ts, ordinal: 5, type: 'event_msg', payload: { type: 'item_completed', thread_id: id, turn_id: 't1', item: { type: 'AgentMessage', id: 'm1', content: [{ type: 'Text', text: '登入流程在 src/auth。' }] } } },
+    { timestamp: ts, ordinal: 6, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '登入流程在 src/auth。' }] } },
+    {
+      timestamp: ts,
+      ordinal: 7,
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 1200, output_tokens: 30, reasoning_output_tokens: 0, total_tokens: 1230 }, model_context_window: 258400 },
+        rate_limits: { limit_id: 'codex', primary: { used_percent: 37.5, window_minutes: 300, resets_at: null }, secondary: { used_percent: 12, window_minutes: 10080, resets_at: null } },
+      },
+    },
+    { timestamp: ts, ordinal: 8, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', last_agent_message: '登入流程在 src/auth。' } },
+  ];
+  writeJsonl(f, entries);
+  return { f, entries };
+}
+
+test('新版 Codex（item_completed）的 session 也會列出，標題、則數、context、額度都讀得到', () => {
+  const home = tmpdir();
+  newFormatRollout(home, '01a0f889-7688-7b30-89f8-11575bb0a33e', '/proj');
+  const [s] = cx.listSessions('/proj', home);
+  assert.ok(s, 'session 應該出現在清單');
+  assert.strictEqual(s.title, '請幫我看一下登入流程');
+  assert.strictEqual(s.messageCount, 1);
+  assert.strictEqual(s.spawnedByAgent, false);
+  assert.strictEqual(s.context.tokens, 1230);
+  assert.strictEqual(cx.getSessionRateLimits(s.id, home).primary.pct, 37.5);
+});
+
+test('同一則訊息新舊兩種寫法都出現時只算一次', () => {
+  const home = tmpdir();
+  newFormatRollout(home, 'dup-1', '/proj', { dup: true });
+  assert.strictEqual(cx.listSessions('/proj', home)[0].messageCount, 1);
+});
+
+test('窗格互通讀 Codex 回覆：新版的 AgentMessage 與 task_complete', () => {
+  const { codexLastReply } = require('../src/main/bridge');
+  const { entries } = newFormatRollout(tmpdir(), 'r1', '/proj');
+  assert.deepStrictEqual(codexLastReply(entries), { promptAt: Date.parse('2026-10-01T17:35:53.580Z'), text: '登入流程在 src/auth。', done: true });
+});

@@ -44,10 +44,36 @@ function metaOf(entries) {
   return { id: m.id, cwd, source: m.source || null, originator: m.originator || null, timestamp: m.timestamp || first.timestamp };
 }
 
+// 對話訊息有兩種寫法：
+//   舊版：event_msg 的 user_message / agent_message（message 是字串）
+//   新版（約 0.15x 起）：event_msg 的 item_completed，item.type 是 UserMessage / AgentMessage，文字在 item.content[].text
+// 同一個 session 可能兩種都有（升級前後的對話），兩種都讀
+function itemText(item) {
+  return (Array.isArray(item.content) ? item.content : [])
+    .map((c) => (c && typeof c.text === 'string' ? c.text : ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
 function userMessageText(e) {
-  const p = e.payload || {};
-  if (e.type === 'event_msg' && p.type === 'user_message' && typeof p.message === 'string') return p.message;
+  const p = (e && e.payload) || {};
+  if (e.type !== 'event_msg') return null;
+  if (p.type === 'user_message' && typeof p.message === 'string') return p.message;
+  if (p.type === 'item_completed' && p.item && p.item.type === 'UserMessage') return itemText(p.item);
   return null;
+}
+
+function agentMessageText(e) {
+  const p = (e && e.payload) || {};
+  if (e.type !== 'event_msg') return null;
+  if (p.type === 'agent_message' && p.message) return String(p.message);
+  if (p.type === 'item_completed' && p.item && p.item.type === 'AgentMessage') return itemText(p.item) || null;
+  return null;
+}
+
+// 同一則訊息兩種寫法都出現時（幾秒內、文字相同）只算一次
+function isRepeat(prev, text, ts) {
+  return !!prev && prev.text === text && Math.abs((ts || 0) - (prev.ts || 0)) < 5000;
 }
 
 function isRealPrompt(t) {
@@ -109,9 +135,13 @@ function readSession(file) {
   let firstPrompt = null;
   let lastPrompt = null;
   let count = 0;
+  let prev = null;
   for (const e of entries) {
     const t = userMessageText(e);
     if (isRealPrompt(t)) {
+      const ts = Date.parse(e.timestamp) || 0;
+      if (isRepeat(prev, t.trim(), ts)) continue;
+      prev = { text: t.trim(), ts };
       count++;
       if (!firstPrompt) firstPrompt = t.trim();
       lastPrompt = t.trim();
@@ -138,7 +168,7 @@ function readSession(file) {
 
 function samePath(a, b) {
   if (!a || !b) return false;
-  const norm = (p) => path.resolve(p).replace(/[\\/]+$/, '');
+  const norm = (p) => path.resolve(String(p).replace(/^\\\\\?\\/, '')).replace(/[\\/]+$/, '');
   return process.platform === 'linux' ? norm(a) === norm(b) : norm(a).toLowerCase() === norm(b).toLowerCase();
 }
 
@@ -224,5 +254,6 @@ module.exports = {
   contextFromEntries,
   rateLimitsFromEntries,
   userMessageText,
+  agentMessageText,
   isRealPrompt,
 };

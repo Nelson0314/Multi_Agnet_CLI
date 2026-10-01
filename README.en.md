@@ -188,7 +188,7 @@ Context usage is `input + cache_creation + cache_read` tokens of the last main-t
 - Moving a pane restarts its process. Text typed into the input box but not sent is lost, and background tasks started inside that session stop. Shell panes keep the account they started with.
 - The Linux shortcut passes `--no-sandbox` because Electron installed from npm has no setuid `chrome-sandbox`.
 
-- Newer Codex versions can move sessions to a paginated, compressed format (after `codex migrate-rollouts --apply`). The app reads classic `rollout-*.jsonl` files only, so migrated sessions do not show up in the Codex tab.
+- Around 0.15x, Codex changed how messages are written in its session files (`item_completed` with `UserMessage` / `AgentMessage`). Both the old and new forms are read (tested with 0.159.3). Sessions compressed to `.jsonl.zst` do not show up in the Codex tab.
 
 ## Development
 

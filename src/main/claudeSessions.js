@@ -23,8 +23,9 @@ function encodeProjectPath(cwd) {
 }
 
 const CASE_INSENSITIVE = process.platform === 'win32' || process.platform === 'darwin';
+// Windows 的長路徑寫法 \\?\C:\... 去掉前綴，才能跟一般寫法比對
 const normPath = (p) => {
-  const n = path.resolve(p).replace(/[\\/]+$/, '').replace(/\\/g, '/');
+  const n = path.resolve(String(p).replace(/^\\\\\?\\/, '')).replace(/[\\/]+$/, '').replace(/\\/g, '/');
   return CASE_INSENSITIVE ? n.toLowerCase() : n;
 };
 

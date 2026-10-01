@@ -192,7 +192,7 @@ Context 用量是最後一次主線回覆的 `input + cache_creation + cache_rea
 - 換帳號會重新啟動窗格裡的程式：輸入框裡還沒送出的文字會不見，這個 session 裡開著的背景工作也會停止。純終端機窗格維持它開啟時的帳號。
 - Linux 捷徑帶 `--no-sandbox`，因為 npm 安裝的 Electron 沒有設定 setuid 的 `chrome-sandbox`。
 
-- Codex 新版開始把 session 改存成分頁、壓縮的格式（`codex migrate-rollouts --apply` 之後）。目前只讀得到傳統的 `rollout-*.jsonl`，遷移過的 session 不會出現在 Codex 分頁。
+- Codex 約 0.15x 起改了紀錄裡對話訊息的寫法（`item_completed` 的 `UserMessage` / `AgentMessage`），新舊兩種都讀得到（用 0.159.3 實測）。壓縮成 `.jsonl.zst` 的紀錄目前不會出現在 Codex 分頁。
 
 ## 開發
 

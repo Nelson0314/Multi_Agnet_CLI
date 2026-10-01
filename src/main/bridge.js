@@ -34,7 +34,7 @@ function claudeLastReply(entries) {
   return { promptAt, text: texts.join('\n\n'), done };
 }
 
-/** Codex：最後一個 user_message 之後的 agent_message；task_complete 代表這輪結束 */
+/** Codex：最後一個使用者訊息之後的 agent 回覆（新舊兩種寫法都認）；task_complete 代表這輪結束 */
 function codexLastReply(entries) {
   let i = entries.length - 1;
   while (i >= 0 && !codex.isRealPrompt(codex.userMessageText(entries[i]))) i--;
@@ -44,7 +44,8 @@ function codexLastReply(entries) {
   for (let j = i + 1; j < entries.length; j++) {
     const p = entries[j].payload || {};
     if (entries[j].type !== 'event_msg') continue;
-    if (p.type === 'agent_message' && p.message) texts.push(p.message.trim());
+    const t = codex.agentMessageText(entries[j]);
+    if (t && t.trim() && texts[texts.length - 1] !== t.trim()) texts.push(t.trim());
     if (p.type === 'task_complete') {
       done = true;
       if (!texts.length && p.last_agent_message) texts.push(String(p.last_agent_message).trim());
