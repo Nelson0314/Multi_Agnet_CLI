@@ -65,10 +65,6 @@ Codex 沒有「額外 skill 資料夾」的設定，所以 Claude 的 skills 以
 
 Windows 的指令經過 `cmd.exe`，總長約 8 KB、不能有換行，放不下整份指示，所以改寫成每個專案固定位置的檔案，`developer_instructions` 只留一句請 Codex 先讀它。
 
-### 中途加入也跟得上
-
-團隊說明要求 agent 在接手或繼續別的窗格的工作之前，先用 `list_panes` 與 `read_pane`（`messages`）讀那個窗格最近的對話。`messages` 只取使用者與 agent 的文字，不含工具輸出。
-
 ## 額度用完時
 
 ### 為什麼平常要在每個視窗打 /login

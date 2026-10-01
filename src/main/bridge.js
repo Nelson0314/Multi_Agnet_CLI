@@ -53,35 +53,6 @@ function codexLastReply(entries) {
   return { promptAt, text: texts.join('\n\n'), done };
 }
 
-/** 最近 n 則對話（使用者與 agent 的文字，不含工具輸出），讓剛加入的 agent 跟上另一個窗格在做什麼 */
-function recentMessages(entries, kind, n) {
-  const turns = [];
-  for (const e of entries) {
-    if (kind === 'codex') {
-      const p = e.payload || {};
-      const u = codex.userMessageText(e);
-      if (codex.isRealPrompt(u)) turns.push({ role: 'user', text: u.trim() });
-      else if (e.type === 'event_msg' && p.type === 'agent_message' && p.message) turns.push({ role: 'agent', text: String(p.message).trim() });
-    } else if (isRealPromptEntry(e)) {
-      turns.push({ role: 'user', text: claude.textOf(e.message.content).trim() });
-    } else if (e.type === 'assistant' && !e.isSidechain && e.message) {
-      const t = claude.textOf(e.message.content).trim();
-      if (!t) continue;
-      // 同一則回覆拆成多筆時合併
-      const last = turns[turns.length - 1];
-      if (last && last.role === 'agent' && last.id && last.id === e.message.id) last.text += `\n\n${t}`;
-      else turns.push({ role: 'agent', text: t, id: e.message.id });
-    }
-  }
-  return turns.slice(-n);
-}
-
-function formatMessages(turns, kind) {
-  const who = kind === 'codex' ? 'Codex' : 'Claude';
-  const clip = (t) => (t.length > 3000 ? `${t.slice(0, 3000)}\n(truncated)` : t);
-  return turns.map((t) => `### ${t.role === 'user' ? 'User' : who}\n${clip(t.text)}`).join('\n\n');
-}
-
 // ---------------------------------------------------------------- 伺服器
 const ENTER_DELAY = 300;
 const CODEX_ENTER_DELAY = 900;
@@ -218,26 +189,15 @@ class Bridge {
       : `Sent to pane ${target.index}. Use wait_for_reply to get the answer.`;
   }
 
-  transcript(target, bytes) {
+  lastReply(target) {
     const pane = this.panes.get(target.paneId);
     const file = pane && pane.sessionId ? this.transcriptFile(pane) : null;
     if (!file || !fs.existsSync(file)) return null;
-    return { kind: pane.kind, entries: readTail(file, bytes) };
+    const entries = readTail(file, 1024 * 1024);
+    return pane.kind === 'codex' ? codexLastReply(entries) : claudeLastReply(entries);
   }
 
-  lastReply(target) {
-    const t = this.transcript(target, 1024 * 1024);
-    if (!t) return null;
-    return t.kind === 'codex' ? codexLastReply(t.entries) : claudeLastReply(t.entries);
-  }
-
-  async read(target, { lines = 60, messages = 0 } = {}) {
-    const n = Math.min(40, Number(messages) || 0);
-    if (n > 0 && target.kind !== 'shell') {
-      const t = this.transcript(target, 4 * 1024 * 1024);
-      const turns = t ? recentMessages(t.entries, t.kind, n) : [];
-      if (turns.length) return formatMessages(turns, t.kind);
-    }
+  async read(target, { lines = 60 } = {}) {
     const r = target.kind === 'shell' ? null : this.lastReply(target);
     if (r && r.text) return `${r.done ? '' : '(still working) '}${r.text}`;
     const screen = await this.askRenderer('readScreen', { paneId: target.paneId, lines: Math.min(400, Number(lines) || 60) });
@@ -258,4 +218,4 @@ class Bridge {
   }
 }
 
-module.exports = { Bridge, claudeLastReply, codexLastReply, recentMessages, HOP_LIMIT };
+module.exports = { Bridge, claudeLastReply, codexLastReply, HOP_LIMIT };

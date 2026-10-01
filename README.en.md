@@ -137,8 +137,6 @@ The other way round, Claude panes get the project's `AGENTS.md` (unless `CLAUDE.
 
 Hover a pane title to see which files, skills and MCP servers it was given. To turn this off, clear "Share instructions between Claude and Codex" in the dashboard settings.
 
-To catch up when it joins mid-task, the team note tells each agent to read the other panes' recent conversation with `list_panes` and `read_pane` (with `messages`) before it starts.
-
 ## Panes talking to each other
 
 Every Claude and Codex pane starts with a set of MCP tools and a short note telling the agent it runs next to other panes and should use these tools to reach them, instead of starting its own `claude` or `codex` process. Nothing to install. The `[mcp_servers.multi-agent]` block older versions wrote to Codex's `config.toml` is removed at startup.
@@ -147,7 +145,7 @@ Every Claude and Codex pane starts with a set of MCP tools and a short note tell
 | --- | --- |
 | `list_panes` | Pane numbers, kinds and names in the current project |
 | `send_to_pane` | Send a message to another pane |
-| `read_pane` | Read another pane's latest reply, or with `messages` its recent conversation; for a shell pane, the last screen lines |
+| `read_pane` | Read another pane's latest reply, or the last screen lines of a shell pane |
 | `wait_for_reply` | Wait until a Claude or Codex pane finishes answering and return the reply |
 
 For example, tell the Claude pane "ask the Codex in pane 3 to review src/api.ts and summarize its reply". Claude calls the tools itself, and both sides of the conversation stay on screen.

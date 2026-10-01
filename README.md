@@ -141,8 +141,6 @@ Codex 當子 agent：帳號選單的「讓 Claude 可以呼叫 Codex」會執行
 
 把滑鼠移到窗格標題上，可以看到這個窗格帶上了哪些檔案、skills 與 MCP server。不想共用的話，關掉儀表板設定的「Claude 與 Codex 共用指示」。
 
-中途加入的 agent 要跟上進度：團隊說明會要它先用 `list_panes` 與 `read_pane`（加 `messages`）讀其他窗格最近的對話，再開始做。
-
 ## 窗格之間對話
 
 每個 Claude 與 Codex 窗格啟動時都會自動帶上一組 MCP 工具，並附上一段說明，讓它知道自己在多窗格環境裡，要跟其他窗格溝通時該用這些工具，而不是自己另開一個 `claude` 或 `codex` 程序。不需要安裝。舊版寫進 Codex `config.toml` 的 `[mcp_servers.multi-agent]` 會在啟動時移除。
@@ -151,7 +149,7 @@ Codex 當子 agent：帳號選單的「讓 Claude 可以呼叫 Codex」會執行
 | --- | --- |
 | `list_panes` | 列出目前專案的窗格編號、類型、名稱 |
 | `send_to_pane` | 把訊息送進另一個窗格 |
-| `read_pane` | 讀另一個窗格最新的回覆，加上 `messages` 則讀最近幾則對話；PowerShell 窗格讀最後幾行畫面 |
+| `read_pane` | 讀另一個窗格最新的回覆；PowerShell 窗格則讀最後幾行畫面 |
 | `wait_for_reply` | 等 Claude 或 Codex 窗格回覆完，再把回覆交回來 |
 
 例如在 Claude 窗格說「請窗格 3 的 Codex review 我剛改的 src/api.ts，等它回覆後整理重點」，Claude 會自己呼叫這些工具，兩邊的對話都在你眼前。

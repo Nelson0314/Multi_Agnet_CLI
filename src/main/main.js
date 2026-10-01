@@ -166,11 +166,11 @@ const teamHint = (other) => `You are running inside Multi-Agent CLI, a desktop a
 
 The multi-agent MCP tools let you work with the other panes:
 - list_panes: see the open panes, their numbers, kinds and titles.
-- read_pane: read another pane's latest reply, or the last lines of a shell pane. Pass messages (for example 10) to read the recent conversation of that pane and catch up on what it is doing.
 - send_to_pane: send a message or a task to another pane, for example ask the ${other} pane to review a change.
 - wait_for_reply: wait until that Claude or Codex pane finishes and get its answer.
+- read_pane: read another pane's latest reply, or the last lines of a shell pane.
 
-When the user refers to another pane, to "${other}", or asks you to coordinate with another agent, use these tools. Do not start a separate ${other.toLowerCase()} process from the shell or through a different MCP server for this, because that would not be the session the user is looking at. Before taking over or continuing work another pane started, catch up with list_panes and read_pane (with messages). When you send a task, include the goal, the relevant files and how to verify the result.
+When the user refers to another pane, to "${other}", or asks you to coordinate with another agent, use these tools. Do not start a separate ${other.toLowerCase()} process from the shell or through a different MCP server for this, because that would not be the session the user is looking at. When you send a task, include the goal, the relevant files and how to verify the result.
 `;
 
 function userStatusline(profile) {
