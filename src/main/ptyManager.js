@@ -23,18 +23,24 @@ function shQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
+// Windows：用雙引號包住，裡面的 " 寫成 ""（cmd.exe 與 MSVCRT 都把它當成一個 "）；
+// 結尾的反斜線要加倍，否則會跟後面的引號變成 \"
 function winQuote(s) {
-  return /^[\w\-.:/\\]+$/.test(s) ? s : `"${String(s).replace(/"/g, '""')}"`;
+  s = String(s);
+  return /^[\w\-.:/\\]+$/.test(s) ? s : `"${s.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`;
 }
 
 // 從 Dock / 開始選單啟動的 GUI app PATH 很陽春，所以透過使用者的 login shell 執行，
-// 讓 nvm / homebrew / npm global 安裝的 claude、codex 都找得到
-function commandFor(cmd, args, { interactive = true } = {}) {
-  if (process.platform === 'win32') {
+// 讓 nvm / homebrew / npm global 安裝的 claude、codex 都找得到。
+// Windows 透過 cmd.exe（npm 安裝的 claude / codex 是 .cmd）。命令列要自己組好整串交出去（verbatim）：
+// node-pty 與 child_process 預設會把參數裡的 " 寫成 \"，cmd.exe 不認得這種寫法，含空白的參數會被拆開
+function commandFor(cmd, args, { interactive = true, platform = process.platform, env = process.env } = {}) {
+  if (platform === 'win32') {
     const line = [cmd, ...args].map(winQuote).join(' ');
-    return { file: process.env.COMSPEC || 'cmd.exe', args: ['/d', '/s', '/c', line] };
+    // /s：cmd 只去掉最外層那對引號，裡面原封不動執行
+    return { file: env.COMSPEC || 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true };
   }
-  const shell = process.env.SHELL || '/bin/bash';
+  const shell = env.SHELL || '/bin/bash';
   const line = ['exec', cmd, ...args.map(shQuote)].join(' ');
   return { file: shell, args: interactive ? ['-l', '-i', '-c', line] : ['-l', '-c', line] };
 }
@@ -67,7 +73,8 @@ class PtyManager {
     pty = pty || require('node-pty');
     // raw：直接執行（例如 PowerShell 本身），不再包一層 cmd.exe / login shell
     const c = raw ? { file: cmd, args } : commandFor(cmd, args);
-    const p = pty.spawn(c.file, c.args, {
+    // verbatim：Windows 上把組好的命令列當成字串交給 node-pty，它就不會再加引號、跳脫
+    const p = pty.spawn(c.file, c.verbatim ? c.args.join(' ') : c.args, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -156,4 +163,4 @@ class PtyManager {
   }
 }
 
-module.exports = { PtyManager, LIMIT_PATTERNS, ANSI, commandFor, buildEnv, shellCommand };
+module.exports = { PtyManager, LIMIT_PATTERNS, ANSI, commandFor, winQuote, buildEnv, shellCommand };

@@ -88,7 +88,7 @@ function accountEnv(kind, profile, codexProfileId) {
 function runInShell(cmd, args, env) {
   const c = commandFor(cmd, args, { interactive: process.platform !== 'win32' });
   return new Promise((resolve) => {
-    execFile(c.file, c.args, { env: { ...process.env, ...env }, timeout: 60_000 }, (err, stdout, stderr) => {
+    execFile(c.file, c.args, { env: { ...process.env, ...env }, timeout: 60_000, windowsHide: true, windowsVerbatimArguments: !!c.verbatim }, (err, stdout, stderr) => {
       resolve({ ok: !err, output: `${stdout || ''}${stderr || ''}`.trim() || (err ? err.message : '') });
     });
   });
@@ -143,8 +143,8 @@ let noDaemonCheck = null;
 function codexNoDaemon() {
   if (!noDaemonCheck) {
     noDaemonCheck = new Promise((resolve) => {
-      const { file, args } = commandFor('codex', ['--help'], { interactive: false });
-      execFile(file, args, { timeout: 15000, windowsHide: true, maxBuffer: 4 << 20 }, (_err, out, errOut) => {
+      const c = commandFor('codex', ['--help'], { interactive: false });
+      execFile(c.file, c.args, { timeout: 15000, windowsHide: true, windowsVerbatimArguments: !!c.verbatim, maxBuffer: 4 << 20 }, (_err, out, errOut) => {
         resolve(/--no-daemon\b/.test(`${out}${errOut}`));
       });
     });
@@ -225,9 +225,13 @@ function codexPaneArgs({ cwd, codexProfile, claudeProfile }) {
       Object.assign(shared, { sources: ctx.sources, skills: ctx.skills });
       const mine = team.codexMcpNames(home);
       const servers = team.claudeMcpServers({ claudeJsonFile: profiles.claudeJsonOf(claudeProfile), claudeDir, cwd });
+      // Windows 的 cmd.exe 命令列上限約 8 KB，放不下的 MCP server 就不帶
+      let room = process.platform === 'win32' ? 6000 : Infinity;
       for (const [name, t] of Object.entries(servers)) {
         if (name === 'multi-agent' || mine.has(name)) continue;
-        args.push('-c', `mcp_servers.${name}=${team.tomlValue(t)}`);
+        const arg = `mcp_servers.${name}=${team.tomlValue(t)}`;
+        if ((room -= arg.length + 8) < 0) break;
+        args.push('-c', arg);
         shared.mcp.push(name);
       }
     } catch (e) {
