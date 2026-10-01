@@ -142,10 +142,14 @@ select:focus {
 .account-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  max-width: 320px;
+  gap: 6px;
+  max-width: 280px;
   overflow: hidden;
   white-space: nowrap;
+}
+.account-btn .acc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .avatar {
   width: 18px;
@@ -386,7 +390,7 @@ select:focus {
 }
 .workspace {
   position: absolute;
-  inset: 0;
+  inset: var(--relay-h, 0px) 0 0 0; /* 上方有額度提示列時往下讓出位置 */
   background: var(--bg); /* 明確背景：版面重排後縫隙會重繪，不殘留舊畫面 */
   display: flex;
   flex-direction: column;
@@ -800,6 +804,45 @@ input[type='checkbox'] {
   padding: 4px;
   border: 1px solid var(--line);
   background: var(--bg);
+}
+.login-code {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.login-code input {
+  flex: 1;
+  min-width: 0;
+}
+/* 帳號額度用完的提示列：在工作區最上方，窗格往下讓出位置（--relay-h 由 app.js 設定），不會蓋住窗格 */
+.relay-bars {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+}
+.relay-bars:empty {
+  display: none;
+}
+.relay-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--bad) 12%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
+  line-height: 1.5;
+}
+.relay-bar .msg {
+  flex: 1;
+  min-width: 240px;
+}
+.relay-bar button:not(.ghost) {
+  border-color: var(--line-strong);
 }
 .toasts {
   position: fixed;

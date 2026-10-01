@@ -60,12 +60,28 @@ function claudeRoot(profile) {
   return path.join(profiles.claudeDirOf(profile), 'projects');
 }
 
-function codexHomeOf(profile) {
-  return profile.codexHome || codexSessions.defaultCodexHome();
+const codexHomeOf = profiles.codexHomeOf;
+
+// Claude 與 Codex 帳號分開：窗格的 profileId 指的是它那個工具的帳號
+const toolOf = (kind) => (kind === 'codex' || kind === 'codex-login' ? 'codex' : 'claude');
+
+function accountOf(tool, id) {
+  return tool === 'codex' ? store.codexProfile(id || store.data.activeCodexProfile) : store.profile(id || store.data.activeProfile);
 }
 
-function profilesWithAccounts() {
-  return store.data.profiles.map((p) => ({ ...p, account: profiles.readAccount(p) }));
+function accountsSnapshot() {
+  return {
+    claude: { active: store.data.activeProfile, profiles: store.data.profiles.map((p) => ({ ...p, account: profiles.readAccount(p) })) },
+    codex: { active: store.data.activeCodexProfile, profiles: store.data.codexProfiles.map((p) => ({ ...p, account: profiles.readCodexAccount(p) })) },
+  };
+}
+
+// 窗格的環境變數。Claude 窗格與 shell 也帶上目前的 Codex 帳號，
+// 這樣 Claude 叫出來的 Codex 子 agent、在 shell 裡打的 codex 都用你選的 Codex 帳號
+function accountEnv(kind, profile, codexProfileId) {
+  if (kind === 'codex' || kind === 'codex-login') return profiles.codexEnv(profile);
+  if (kind === 'login') return profiles.claudeEnv(profile);
+  return { ...profiles.claudeEnv(profile), ...profiles.codexEnv(store.codexProfile(codexProfileId || store.data.activeCodexProfile)) };
 }
 
 // 在使用者 login shell 中執行一次性指令（不是互動 pane），例如 claude mcp add
@@ -104,7 +120,8 @@ function createWindow() {
 
 function spawnArgs({ kind, sessionId, name, prompt }) {
   if (kind === 'claude') {
-    if (sessionId) return { cmd: 'claude', args: ['--resume', sessionId], sessionId };
+    // 續跑時可以附一句話（例如換帳號後的「繼續」），Claude 會在載入對話後直接送出
+    if (sessionId) return { cmd: 'claude', args: ['--resume', sessionId, ...(prompt ? [prompt] : [])], sessionId };
     const id = crypto.randomUUID();
     const args = ['--session-id', id];
     if (name) args.push('-n', name);
@@ -112,7 +129,7 @@ function spawnArgs({ kind, sessionId, name, prompt }) {
     return { cmd: 'claude', args, sessionId: id };
   }
   if (kind === 'codex') {
-    if (sessionId) return { cmd: 'codex', args: ['resume', sessionId], sessionId };
+    if (sessionId) return { cmd: 'codex', args: ['resume', sessionId, ...(prompt ? [prompt] : [])], sessionId };
     return { cmd: 'codex', args: prompt ? [prompt] : [], sessionId: null };
   }
   if (kind === 'shell') return { ...shellCommand(), sessionId: null, raw: true };
@@ -188,6 +205,31 @@ function cleanupPaneFiles(paneId) {
   } catch {}
 }
 
+// Codex 額度（每個 Codex 帳號）。共用 session 歷史時，sessions/ 裡的檔案分不出是哪個帳號寫的，
+// 所以優先看這個帳號開著的窗格自己的 session 檔，其次是之前記下的值；
+// 只有 sessions/ 沒跟別的帳號共用時才直接掃最新的檔案
+function sharesCodexSessions(p) {
+  if (p.id !== profiles.DEFAULT_ID) return !!p.shareHistory;
+  return store.data.codexProfiles.some((x) => x.id !== profiles.DEFAULT_ID && x.shareHistory);
+}
+
+function codexLimitsFor(p) {
+  const prev = store.data.codexLimits[p.id] || null;
+  let best = prev;
+  const consider = (rl) => {
+    if (rl && (!best || (rl.observedAt || 0) > (best.observedAt || 0))) best = rl;
+  };
+  for (const pane of panes.values()) {
+    if (pane.kind === 'codex' && pane.profileId === p.id && pane.sessionId) consider(codexSessions.getSessionRateLimits(pane.sessionId, codexHomeOf(p)));
+  }
+  if (!sharesCodexSessions(p)) consider(codexSessions.getRateLimits(codexHomeOf(p)));
+  if (best && best !== prev) {
+    store.data.codexLimits[p.id] = best;
+    store.save();
+  }
+  return best;
+}
+
 // statusline 回報：更新這個窗格目前的 session（/clear 之後會換新的）、context 與額度
 const liveLimits = new Map(); // profileId -> { at, fiveHour, sevenDay }
 function handleStatus(paneId, s) {
@@ -234,7 +276,7 @@ function queueTitle(kind, cwd, sessionId, name, profileId) {
 function flushTitles() {
   for (const [key, t] of pendingTitles) {
     try {
-      const profile = store.profile(t.profileId || store.data.activeProfile);
+      const profile = accountOf(toolOf(t.kind), t.profileId);
       const done =
         t.kind === 'claude'
           ? titles.setClaudeTitle(claudeSessions.sessionFile(t.cwd, t.sessionId, claudeRoot(profile)), t.sessionId, t.name)
@@ -266,8 +308,7 @@ function registerIpc() {
   ipcMain.handle('app:init', () => ({
     platform: process.platform,
     maxPanes: MAX_PANES,
-    activeProfile: store.data.activeProfile,
-    profiles: profilesWithAccounts(),
+    accounts: accountsSnapshot(),
     settings: store.data.settings,
     lastProject: store.data.lastProject,
     recentProjects: store.data.recentProjects,
@@ -293,14 +334,13 @@ function registerIpc() {
   });
 
   ipcMain.handle('sessions:list', (_e, cwd) => {
-    const active = store.profile(store.data.activeProfile);
     const names = store.project(cwd).names;
     const withName = (s) => ({ ...s, title: names[s.id] || s.title, file: undefined });
     let codexList = [];
     try {
-      codexList = codexSessions.listSessions(cwd, codexHomeOf(active)).map(withName);
+      codexList = codexSessions.listSessions(cwd, codexHomeOf(accountOf('codex'))).map(withName);
     } catch {}
-    return { claude: claudeSessions.listSessions(cwd, claudeRoot(active)).map(withName), codex: codexList };
+    return { claude: claudeSessions.listSessions(cwd, claudeRoot(accountOf('claude'))).map(withName), codex: codexList };
   });
 
   ipcMain.handle('pane:spawn', async (_e, opts) => {
@@ -308,7 +348,9 @@ function registerIpc() {
     const inGrid = (k) => k === 'claude' || k === 'codex' || k === 'shell';
     const running = [...panes.values()].filter((p) => p.cwd === opts.cwd && inGrid(p.kind)).length;
     if (inGrid(opts.kind) && running >= MAX_PANES) throw new Error('E_MAX_PANES');
-    const profile = store.profile(opts.profileId || store.data.activeProfile);
+    const profile = accountOf(toolOf(opts.kind), opts.profileId);
+    // Claude 窗格與 shell 另外記下用哪個 Codex 帳號（Claude 叫出來的 Codex、shell 裡的 codex 會用它）
+    const codexProfileId = opts.kind === 'claude' || opts.kind === 'shell' ? accountOf('codex', opts.codexProfileId).id : null;
     const spec = spawnArgs(opts);
     const { cmd, sessionId, raw } = spec;
     const paneId = crypto.randomUUID();
@@ -327,12 +369,20 @@ function registerIpc() {
     const since = Date.now();
     // 子資料夾或 worktree 裡的 session 在它原本的資料夾續跑，claude --resume 才找得到
     const runCwd = opts.runCwd && fs.existsSync(opts.runCwd) ? opts.runCwd : cwd;
-    const env = { ...profiles.envFor(profile), ...(bridge ? bridge.envFor(paneId) : {}) };
+    // 換到另一個 Claude 帳號時，先補上預設帳號的資料夾信任、MCP server 與首次設定，續跑才不會卡在對話框
+    if ((opts.kind === 'claude' || opts.kind === 'shell') && cwd) {
+      try {
+        profiles.syncSharedClaudeState(profile, [cwd, runCwd]);
+      } catch (e) {
+        console.warn('sync claude state:', e.message);
+      }
+    }
+    const env = { ...accountEnv(opts.kind, profile, codexProfileId), ...(bridge ? bridge.envFor(paneId) : {}) };
     const userSl = opts.kind === 'claude' ? userStatusline(profile) : null;
     if (userSl) env.MULTI_AGENT_USER_STATUSLINE = userSl;
     ptys.spawn(paneId, { cmd, args, cwd: runCwd, env, cols: opts.cols, rows: opts.rows, raw });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
-    return { paneId, sessionId, profileId: profile.id };
+    return { paneId, sessionId, profileId: profile.id, codexProfileId };
   });
 
   ipcMain.on('bridge:answer', (_e, id, value) => {
@@ -346,11 +396,11 @@ function registerIpc() {
   // 把窗格互通的 MCP server 裝到 Claude（claude mcp add）與 Codex（~/.codex/config.toml）
   // Claude 窗格會自動帶上 multi-agent 工具（見 claudePaneArgs），這裡只需要設定 Codex：
   // Codex 會過濾傳給 MCP server 的環境變數，所以要用 env_vars 明列要轉交的連線資訊
-  ipcMain.handle('bridge:install', async (_e, profileId) => {
-    const p = store.profile(profileId || store.data.activeProfile);
+  ipcMain.handle('bridge:install', async (_e, codexProfileId) => {
+    const p = accountOf('codex', codexProfileId);
     const out = [];
     // 舊版裝在 Claude user scope 的同名 server 移除，避免和窗格自動帶上的重複
-    const rm = await runInShell('claude', ['mcp', 'remove', '--scope', 'user', 'multi-agent'], profiles.envFor(p));
+    const rm = await runInShell('claude', ['mcp', 'remove', '--scope', 'user', 'multi-agent'], profiles.claudeEnv(accountOf('claude')));
     out.push(`claude: ${rm.ok ? 'removed old user-scope entry; panes get the tools automatically' : 'panes get the tools automatically'}`);
     try {
       writeCodexBridgeConfig(codexHomeOf(p), MCP_SCRIPT);
@@ -365,9 +415,9 @@ function registerIpc() {
   ipcMain.on('pty:write', (_e, id, data) => ptys.write(id, data));
   ipcMain.on('pty:resize', (_e, id, cols, rows) => ptys.resize(id, cols, rows));
   ipcMain.on('pty:resetLimit', (_e, id) => ptys.resetLimit(id));
-  ipcMain.handle('pty:kill', (_e, id) => {
-    ptys.kill(id);
+  ipcMain.handle('pty:kill', async (_e, id) => {
     panes.delete(id);
+    await ptys.kill(id);
     cleanupPaneFiles(id);
   });
 
@@ -392,7 +442,7 @@ function registerIpc() {
     const out = {};
     for (const it of items) {
       if (!it.sessionId) continue;
-      const profile = store.profile(it.profileId || store.data.activeProfile);
+      const profile = accountOf(toolOf(it.kind), it.profileId);
       // 優先用 Claude 自己透過 statusline 回報的數字（跟它畫面上的一致）
       const pane = it.paneId && panes.get(it.paneId);
       if (pane && pane.live && pane.sessionId === it.sessionId && pane.live.context) {
@@ -416,58 +466,82 @@ function registerIpc() {
     await Promise.all(
       store.data.profiles.map(async (p) => {
         const u = await usage.fetchUsage(profiles.claudeDirOf(p), profiles.isDefault(p), { force });
-        // 額度 API 讀不到時，改用 Claude statusline 回報的 5 小時／每週額度
-        const live = liveLimits.get(p.id);
-        claude[p.id] = !u.ok && live ? { ok: true, plan: null, fiveHour: live.fiveHour, sevenDay: live.sevenDay, source: 'statusline' } : u;
+        // 額度 API 讀不到時，改用 Claude statusline 回報的 5 小時／每週額度；live 另外附上給介面判斷是否用完
+        const live = liveLimits.get(p.id) || null;
+        claude[p.id] = !u.ok && live ? { ok: true, plan: null, fiveHour: live.fiveHour, sevenDay: live.sevenDay, source: 'statusline', live } : { ...u, live };
       }),
     );
-    let codex = null;
-    try {
-      codex = codexSessions.getRateLimits(codexHomeOf(store.profile(store.data.activeProfile)));
-    } catch {}
+    const codex = {};
+    for (const p of store.data.codexProfiles) {
+      try {
+        codex[p.id] = codexLimitsFor(p);
+      } catch {
+        codex[p.id] = null;
+      }
+    }
     return { claude, codex };
   });
 
-  ipcMain.handle('profiles:list', () => ({ activeProfile: store.data.activeProfile, profiles: profilesWithAccounts() }));
+  ipcMain.handle('profiles:list', () => accountsSnapshot());
 
-  ipcMain.handle('profiles:add', (_e, name, opts) => {
-    const p = profiles.createProfile(path.join(app.getPath('userData'), 'profiles'), name, opts);
+  // tool：'claude' | 'codex'，兩邊的帳號清單分開
+  ipcMain.handle('profiles:add', (_e, tool, name, opts) => {
+    const base = path.join(app.getPath('userData'), 'profiles');
+    if (tool === 'codex') {
+      const p = profiles.createCodexProfile(base, name, opts);
+      store.data.codexProfiles.push(p);
+      // 預設 Codex 帳號裝過窗格互通的話，新帳號也裝上（共用 config.toml 時本來就有，這裡不會重複）
+      try {
+        const cfg = fs.readFileSync(path.join(codexHomeOf(store.codexProfile(profiles.DEFAULT_ID)), 'config.toml'), 'utf8');
+        if (cfg.includes('[mcp_servers.multi-agent]')) writeCodexBridgeConfig(p.codexHome, MCP_SCRIPT);
+      } catch {}
+      store.save();
+      return p;
+    }
+    const p = profiles.createProfile(base, name, opts);
     store.data.profiles.push(p);
     store.save();
     return p;
   });
 
-  ipcMain.handle('profiles:remove', (_e, id) => {
+  ipcMain.handle('profiles:remove', (_e, tool, id) => {
     if (id === profiles.DEFAULT_ID) throw new Error('E_DEFAULT_PROFILE');
-    store.data.profiles = store.data.profiles.filter((p) => p.id !== id);
-    if (store.data.activeProfile === id) store.data.activeProfile = profiles.DEFAULT_ID;
+    if (tool === 'codex') {
+      store.data.codexProfiles = store.data.codexProfiles.filter((p) => p.id !== id);
+      if (store.data.activeCodexProfile === id) store.data.activeCodexProfile = profiles.DEFAULT_ID;
+      delete store.data.codexLimits[id];
+    } else {
+      store.data.profiles = store.data.profiles.filter((p) => p.id !== id);
+      if (store.data.activeProfile === id) store.data.activeProfile = profiles.DEFAULT_ID;
+    }
     store.save();
   });
 
-  ipcMain.handle('profiles:setActive', (_e, id) => {
-    store.data.activeProfile = store.profile(id).id;
+  ipcMain.handle('profiles:setActive', (_e, tool, id) => {
+    if (tool === 'codex') store.data.activeCodexProfile = store.codexProfile(id).id;
+    else store.data.activeProfile = store.profile(id).id;
     store.save();
-    return store.data.activeProfile;
+    return accountsSnapshot();
   });
 
-  ipcMain.handle('profiles:rename', (_e, id, name) => {
-    store.profile(id).name = name;
+  ipcMain.handle('profiles:rename', (_e, tool, id, name) => {
+    accountOf(tool, id).name = name;
     store.save();
   });
 
   // 讓 Claude 可以把 Codex 當子 agent 呼叫：註冊 `codex mcp-server` 為 user scope MCP server
   ipcMain.handle('codex:installMcp', async (_e, profileId) => {
-    const p = store.profile(profileId || store.data.activeProfile);
-    return runInShell('claude', ['mcp', 'add', '--scope', 'user', 'codex', '--', 'codex', 'mcp-server'], profiles.envFor(p));
+    const p = accountOf('claude', profileId);
+    return runInShell('claude', ['mcp', 'add', '--scope', 'user', 'codex', '--', 'codex', 'mcp-server'], profiles.claudeEnv(p));
   });
 
   ipcMain.handle('handoff:create', (_e, opts) => {
     const src = panes.get(opts.paneId) || {};
-    const profile = store.profile(opts.profileId || src.profileId || store.data.activeProfile);
+    const profile = accountOf(toolOf(opts.fromKind), opts.profileId || src.profileId);
     return createHandoff({
       ...opts,
-      claudeProjectsRoot: claudeRoot(profile),
-      codexHome: codexHomeOf(profile),
+      claudeProjectsRoot: opts.fromKind === 'claude' ? claudeRoot(profile) : undefined,
+      codexHome: opts.fromKind === 'codex' ? codexHomeOf(profile) : undefined,
     });
   });
 
@@ -499,7 +573,7 @@ app.whenReady().then(() => {
     for (const f of fs.readdirSync(BRIDGE_DIR())) if (f.endsWith('.mcp.json')) fs.rmSync(path.join(BRIDGE_DIR(), f), { force: true });
   } catch {}
   // 舊版裝過的 Codex 設定缺 env_vars，啟動時補上
-  for (const p of store.data.profiles) {
+  for (const p of store.data.codexProfiles) {
     try {
       writeCodexBridgeConfig(codexHomeOf(p), MCP_SCRIPT, { onlyIfPresent: true });
     } catch {}
@@ -513,7 +587,7 @@ app.whenReady().then(() => {
     onStatus: handleStatus,
     settings: () => store.data.settings,
     transcriptFile: (pane) => {
-      const profile = store.profile(pane.profileId);
+      const profile = accountOf(toolOf(pane.kind), pane.profileId);
       return pane.kind === 'codex'
         ? codexSessions.findSessionFile(pane.sessionId, codexHomeOf(profile))
         : claudeSessions.sessionFile(pane.cwd, pane.sessionId, claudeRoot(profile));

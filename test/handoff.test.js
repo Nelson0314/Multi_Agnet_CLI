@@ -49,10 +49,10 @@ test('交接文件依語言輸出，且不含 emoji 標題', () => {
     { type: 'system', subtype: 'compact_boundary' },
     assistant('Form done', { input_tokens: 5 }),
   ]);
-  const en = createHandoff({ fromKind: 'claude', toKind: 'codex', sessionId: 's', cwd, lang: 'en', reason: 'claude-limit', claudeProjectsRoot: root });
+  const en = createHandoff({ fromKind: 'claude', toKind: 'codex', sessionId: 's', cwd, lang: 'en', reason: 'switch-profile', claudeProjectsRoot: root });
   const md = fs.readFileSync(en.file, 'utf8');
   assert.match(md, /^# Handoff: s$/m);
-  assert.match(md, /Reason: Claude usage limit reached/);
+  assert.match(md, /Reason: Account switch/);
   assert.match(md, /### User/);
   assert.match(md, /### Claude Code/);
   assert.match(md, /compacted/);

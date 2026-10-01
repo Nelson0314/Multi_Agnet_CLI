@@ -4,11 +4,15 @@ const os = require('os');
 
 let pty; // 延遲載入原生模組，讓純邏輯部分可以在沒編譯 node-pty 的環境下測試
 
-// 額度用完時 CLI 會印出的訊息（Claude / Codex），偵測到就通知 UI 提供 fallback
+// 額度用完時 CLI 會印出的訊息（Claude / Codex），偵測到就通知 UI 換帳號。
+// Claude Code 目前的寫法是「You've hit your session limit · resets 3pm」（session = 5 小時、weekly、
+// Opus、Sonnet 等），舊版是「Claude AI usage limit reached」；Codex 是「You've hit your usage limit」。
+// fast mode 的「fast limit」只是暫時改回一般速度，不算額度用完。
+// 只靠文字會誤判（例如畫面上正好在看這段程式碼），所以介面會再用額度資料確認後才自動換帳號。
 const LIMIT_PATTERNS = [
   /usage limit reached/i,
   /(5-hour|five-hour|weekly|session) limit (reached|hit)/i,
-  /(?:you(?:'|’)ve|you have) (hit|reached) your (usage )?limit/i,
+  /(?:you(?:'|’)ve|you have) (?:hit|reached) your (?:(?:usage|session|weekly|5-hour|opus|sonnet|fable|monthly|spend|credit)\s+){0,3}limit/i,
   /limit will reset at/i,
   /rate_limit_error/i,
 ];
@@ -70,7 +74,8 @@ class PtyManager {
       cwd: cwd || os.homedir(),
       env: buildEnv(env),
     });
-    const rec = { pty: p, buf: '', timer: null, tail: '', limitNotified: false, lastOutput: Date.now() };
+    let exited;
+    const rec = { pty: p, buf: '', timer: null, tail: '', limitNotified: false, lastOutput: Date.now(), exited: new Promise((r) => (exited = r)) };
     this.ptys.set(id, rec);
 
     p.onData((d) => {
@@ -96,6 +101,7 @@ class PtyManager {
         this.send('pty:data', id, rec.buf);
       }
       this.ptys.delete(id);
+      exited();
       this.send('pty:exit', id, exitCode);
     });
     return p.pid;
@@ -133,13 +139,16 @@ class PtyManager {
     }
   }
 
-  kill(id) {
+  // 結束窗格程式，等它真的結束（最多 timeoutMs）。換帳號續跑同一個 session 前要先等舊的程式寫完紀錄、離開，
+  // 否則兩個程序會同時寫同一份對話紀錄
+  kill(id, timeoutMs = 3000) {
     const r = this.ptys.get(id);
-    if (!r) return;
+    if (!r) return Promise.resolve();
     this.ptys.delete(id);
     try {
       r.pty.kill();
     } catch {}
+    return Promise.race([r.exited, new Promise((ok) => setTimeout(ok, timeoutMs))]);
   }
 
   killAll() {

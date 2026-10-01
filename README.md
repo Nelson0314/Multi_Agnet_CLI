@@ -14,9 +14,9 @@
 - 每個窗格是真正的終端機（node-pty + xterm.js），跑的就是你平常的 `claude` 和 `codex`。
 - 最多 6 格。版面依視窗長寬比自動排，最後一列不滿時會加寬，不會留空格。
 - 窗格上方顯示 session 名稱、Claude 或 Codex、使用的帳號，以及 context 用量（例如 `76% · 152k / 200k`）。
-- 儀表板顯示每個 Claude 帳號與 Codex 的 5 小時、每週剩餘額度（依剩餘量變色：50% 以上綠、20–50% 黃、20% 以下紅），以及各窗格的 context。
-- 多個 Claude 帳號。每個帳號是一個 `CLAUDE_CONFIG_DIR`，session 歷史共用，所以可以換帳號 `--resume` 同一個 session。
-- 額度用完時提供接手選項：換另一個 Claude 帳號續跑，或產生交接文件交給 Codex。
+- 儀表板顯示每個 Claude 與 Codex 帳號的 5 小時、每週剩餘額度（依剩餘量變色：50% 以上綠、20–50% 黃、20% 以下紅），以及各窗格的 context。
+- Claude 與 Codex 帳號分開登入、分開切換，兩個工具可以用不同的帳號。同一個工具的帳號共用 session 歷史，所以可以換帳號續跑同一個 session。
+- 帳號額度用完時，用這個帳號的所有窗格一次換到另一個帳號：結束舊程式、用新帳號續跑同一個 session，不用在每個視窗打 `/login`。
 - 五種主題（Terminal、Graphite、Sand、Mono、Paper），整個介面使用系統終端機的等寬字型。Claude 與 Codex 標籤用它們原本的品牌色。
 - 英文與繁體中文介面，在儀表板的「外觀」切換。
 
@@ -63,7 +63,7 @@ npm install
 | 開專案 | 左上角的專案按鈕 |
 | 開舊 session | 點左側清單。已開的會聚焦到該窗格。`↻` 重新讀取 session 歷史 |
 | 新 session | `+ Claude` 或 `+ Codex`，可以先取名 |
-| 純終端機 | `+ PowerShell`（macOS、Linux 顯示為 `+ Shell`），在專案資料夾開一個一般的終端機。Windows 有裝 PowerShell 7 就用 `pwsh`，否則用內建的 Windows PowerShell。會跟著版面一起還原，也使用目前帳號的設定，所以在裡面打 `claude` 會用同一個帳號 |
+| 純終端機 | `+ PowerShell`（macOS、Linux 顯示為 `+ Shell`），在專案資料夾開一個一般的終端機。Windows 有裝 PowerShell 7 就用 `pwsh`，否則用內建的 Windows PowerShell。會跟著版面一起還原，也帶著目前的 Claude 與 Codex 帳號，所以在裡面打 `claude` 或 `codex` 會用這兩個帳號 |
 | 改名 | 雙擊窗格標題，或在清單上按右鍵 |
 | 最大化 | 窗格右上 `⤢` |
 | 調整窗格大小 | 拖曳窗格之間的分隔線；直線調整左右、橫線調整上下，雙擊分隔線回到平均。大小依比例記錄，縮放視窗時照樣填滿，重開程式後沿用 |
@@ -71,7 +71,7 @@ npm install
 | 側欄 | 預設收成一條細邊，只留一個 `›`；滑鼠移上去會浮出完整側欄。按 `‹` `›` 或 `Ctrl/⌘ + B` 固定展開或收起 |
 | 複製、貼上 | macOS 用 `⌘C` `⌘V`；Windows、Linux 用 `Ctrl+Shift+C` `Ctrl+Shift+V`。`Ctrl+V` 留給 Claude Code 貼圖片 |
 | 換帳號續跑、交給 Codex 或 Claude | 窗格右上 `⇄` |
-| 登入、新增、切換帳號 | 右上角帳號選單 |
+| 登入、新增、切換帳號 | 右上角的 Claude、Codex 帳號選單 |
 | 主題、字級、字型、語言 | 儀表板的「外觀」 |
 | 窗格按鈕 | 滑鼠移到窗格上，或窗格是目前焦點時才會出現 |
 
@@ -87,13 +87,37 @@ npm install
 
 ## 帳號
 
-預設帳號就是你原本的 `~/.claude`，不需要搬任何資料。
+Claude 與 Codex 的帳號分開管理。右上角有兩個帳號選單，各自有帳號清單、登入與目前帳號。Claude 窗格用目前的 Claude 帳號，Codex 窗格用目前的 Codex 帳號；Claude 窗格也會帶上目前的 Codex 帳號，所以 Claude 叫出來的 Codex 子 agent 也用它。
 
-新增帳號時，程式會建立一個新的 `CLAUDE_CONFIG_DIR`，並開一個小終端機執行 `claude auth login`。預設勾選「共用 session 歷史」，新帳號的 `projects/`、`settings.json`、`CLAUDE.md`、`commands/`、`agents/`、`skills/` 會以 symlink（Windows 用 junction）指回 `~/.claude`。這樣帳號 A 額度用完時，帳號 B 可以 `claude --resume` 同一個 session，對話內容完整保留。
+預設的 Claude 帳號就是你原本的 `~/.claude`，預設的 Codex 帳號就是原本的 `~/.codex`，不需要搬任何資料。
 
-切換目前帳號只影響之後新開的 session。已經開著的窗格可以從 `⇄` 個別換帳號。
+- 新增 Claude 帳號：建立新的 `CLAUDE_CONFIG_DIR`，開一個小終端機執行 `claude auth login`。預設勾選「共用 session 歷史」，`projects/`、`settings.json`、`CLAUDE.md`、`commands/`、`agents/`、`skills/` 會以 symlink（Windows 用 junction）指回 `~/.claude`。
+- 新增 Codex 帳號：建立新的 `CODEX_HOME`，執行 `codex login`。勾選「共用 session 歷史」時，`sessions/`、`config.toml`、`AGENTS.md`、`session_index.jsonl` 與輸入歷史指回 `~/.codex`；登入資訊（`auth.json`）各自獨立。
+
+登入 Claude 時，如果瀏覽器沒有自動完成、而是顯示一串授權碼，把它貼到小終端機下方的欄位送出即可。這個小終端機裡也可以直接用 `Ctrl+V` 貼上。
+
+在帳號選單選另一個帳號，之後新開的 session 就用它；如果還有窗格開在同一個工具的其他帳號，會問你要不要一起換過去。
 
 請只加入你自己的帳號，並遵守各服務的使用條款。
+
+### 額度用完時
+
+Claude Code 在啟動時決定用哪個帳號，執行中的程式換不了。在一個視窗打 `/login`，會換掉同一個設定資料夾裡所有視窗共用的登入資訊，其他視窗卻還拿著舊的 token，要重新啟動才會換。所以平常一個帳號用完，就得在每個視窗各打一次 `/login`。
+
+這裡每個帳號有自己的設定資料夾，不同帳號可以同時開著。一個帳號額度用完時，所有用這個帳號的窗格（不分專案）會換到剩餘額度最多的帳號：
+
+![帳號額度用完時的換帳號提示列](docs/screenshots/account-relay-zh.png)
+
+1. 已經被額度打斷的窗格和閒置的窗格馬上換：結束程式，用新帳號 `claude --resume <id>`（或 `codex resume <id>`）續跑同一個 session，對話完整保留。
+2. 被打斷的窗格會自動送出一句「繼續」，接著做完被打斷的回覆。可以在設定的「換帳號後自動繼續」關掉。
+3. 還在工作的窗格不會被打斷，等它停下來才換；窗格上方會顯示提示和「現在換」按鈕。
+4. 之後新開的 session 也改用新帳號。
+
+怎樣算用完：窗格出現額度用完的訊息（例如 `You've hit your session limit`），而且這個帳號的額度資料也確認用完；或每 2 分鐘的額度檢查顯示 5 小時或每週額度到 100%，而且有窗格在用這個帳號。只有文字不算數，因為畫面上可能只是剛好出現這幾個字。讀不到額度時會先問你，不會自動換。
+
+儀表板設定的「額度用完時」：詢問我（上方出現提示列，一個按鈕換掉所有窗格）、自動換帳號、不處理。
+
+非預設、共用歷史的 Claude 帳號開窗格前，程式會從 `~/.claude.json` 補上共用資料夾涵蓋不到的幾項：資料夾信任、user 與 local scope 的 MCP server、已允許的工具、首次使用的設定。少了這些，續跑時會卡在「信任這個資料夾嗎？」或少了工具。目標帳號自己的設定不會被覆蓋。
 
 ## Claude 與 Codex
 
@@ -101,17 +125,9 @@ npm install
 
 Codex 當子 agent：帳號選單的「讓 Claude 可以呼叫 Codex」會執行 `claude mcp add --scope user codex -- codex mcp-server`。之後 Claude 可以用 `codex` 開 Codex session、用 `codex-reply` 接著對話。被 Claude 叫出來的 Codex session 會出現在左側 Codex 分頁，標記為「子 agent」，點開就能看它做了什麼，也可以直接接手。
 
-額度用完：窗格輸出出現額度用完的訊息，或額度 API 顯示 5 小時額度達 100% 時，窗格上方會出現選項。
-
-![額度用完時的接手選項](docs/screenshots/limit-banner-zh.png)
-
-1. 用另一個還有額度的 Claude 帳號 `--resume` 同一個 session。
-2. 產生交接文件，在同一格啟動 Codex，要它先讀文件再繼續。
-3. Claude 額度恢復後，用同樣的方式從 Codex 交回 Claude。
+手動交接：窗格的 `⇄` 可以把工作交給另一個工具，程式會寫一份交接文件，啟動另一個工具並要它先讀文件。額度用完時不會交給另一個工具，只會換同一個工具的帳號。
 
 交接文件寫在專案的 `.multi-agent/handoffs/`，內容包含原始需求、待辦清單、改過的檔案、`git status` 與 `git diff --stat`、最近 12 則對話。這個資料夾會自動加進 `.git/info/exclude`。
-
-儀表板的設定可以選「詢問我」「自動交接」「不處理」，以及先換帳號還是先交給 Codex。
 
 ## 窗格之間對話
 
@@ -145,9 +161,9 @@ Claude 窗格會透過 Claude Code 的 statusline 把它自己算的 context 用
 | 資料 | 來源 |
 | --- | --- |
 | Claude session 歷史、名稱、context | `~/.claude/projects/<編碼後路徑>/<sessionId>.jsonl`。名稱依序取 `/rename`、自動標題、第一句話 |
-| Codex session 歷史、context、額度 | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| Codex session 歷史、context、額度 | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`。多個 Codex 帳號共用歷史時，額度從各帳號自己開著的 session 讀 |
 | Claude 5 小時、每週額度 | Claude Code `/usage` 使用的 OAuth usage 端點，token 讀自 `.credentials.json` 或 macOS Keychain |
-| 帳號 email | `<config dir>/.claude.json` 的 `oauthAccount` |
+| 帳號 email | Claude：`<config dir>/.claude.json` 的 `oauthAccount`；Codex：`$CODEX_HOME/auth.json` 的 `id_token` |
 | 本程式設定與開啟中的窗格 | macOS `~/Library/Application Support/multi-agent-cli/state.json`，Windows `%APPDATA%\multi-agent-cli\state.json`，Linux `~/.config/multi-agent-cli/state.json` |
 
 Context 用量是最後一次主線回覆的 `input + cache_creation + cache_read` tokens 除以 context window。預設 window 是 200k，用量超過或模型標示 1M 時改用 1M。
@@ -157,8 +173,9 @@ Context 用量是最後一次主線回覆的 `input + cache_creation + cache_rea
 - Claude 的額度端點沒有公開文件。格式改變時儀表板會顯示「無法取得額度」，其他功能照常。
 - macOS 第一次讀 Keychain 時可能跳出授權視窗，選「永遠允許」。
 - Token 過期時額度暫時讀不到，在該帳號開任一個 session 就會更新。
-- Codex 的額度來自最近一次 Codex 回覆寫下的紀錄，用過 Codex 之後才有資料。
-- 額度用完的偵測靠比對終端機文字。CLI 改了措辭時要更新 `src/main/ptyManager.js` 的 `LIMIT_PATTERNS`。
+- Codex 的額度來自最近一次 Codex 回覆寫下的紀錄，這個帳號用過 Codex 之後才有資料。
+- 額度用完的偵測先比對終端機文字，再用額度數字確認。CLI 改了措辭時要更新 `src/main/ptyManager.js` 的 `LIMIT_PATTERNS`。
+- 換帳號會重新啟動窗格裡的程式：輸入框裡還沒送出的文字會不見，這個 session 裡開著的背景工作也會停止。純終端機窗格維持它開啟時的帳號。
 - Linux 捷徑帶 `--no-sandbox`，因為 npm 安裝的 Electron 沒有設定 setuid 的 `chrome-sandbox`。
 
 - Codex 新版開始把 session 改存成分頁、壓縮的格式（`codex migrate-rollouts --apply` 之後）。目前只讀得到傳統的 `rollout-*.jsonl`，遷移過的 session 不會出現在 Codex 分頁。

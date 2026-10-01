@@ -14,9 +14,9 @@ If you keep several Claude Code sessions open on one project, every reboot means
 - Each pane is a real terminal (node-pty + xterm.js) running your own `claude` and `codex`.
 - Up to 6 panes. The grid follows the window's aspect ratio, and a short last row stretches so no cell is left empty.
 - Each pane header shows the session name, Claude or Codex, the account, and context usage such as `76% · 152k / 200k`.
-- A dashboard with the remaining 5-hour and weekly quota for every Claude account and for Codex, colored by what is left (green above 50%, yellow 20–50%, red below 20%), plus context for each open pane.
-- Multiple Claude accounts. Each one is a `CLAUDE_CONFIG_DIR` with shared session history, so another account can `--resume` the same session.
-- When usage runs out, the pane offers to resume on another Claude account or to hand the work to Codex with a handoff file.
+- A dashboard with the remaining 5-hour and weekly quota for every Claude and Codex account, colored by what is left (green above 50%, yellow 20–50%, red below 20%), plus context for each open pane.
+- Separate Claude and Codex accounts, each with its own sign-in and its own active account, so Claude and Codex can use different accounts. Accounts of the same tool share session history, so another account can resume the same session.
+- When an account runs out of usage, every pane on it moves to another account in one step: the old process exits and the same session resumes on the new account. No `/login` in each window.
 - Five themes (Terminal, Graphite, Sand, Mono, Paper). The whole UI uses your system's terminal font, and the Claude and Codex labels keep their brand colors.
 - English and Traditional Chinese UI, switchable in Dashboard, Appearance.
 
@@ -61,7 +61,7 @@ Platform notes:
 | Open a project | Project button, top left |
 | Open a past session | Click it in the sidebar. An open one gets focused instead. `↻` reloads the history |
 | New session | `+ Claude` or `+ Codex`, optionally with a name |
-| Plain terminal | `+ PowerShell` (`+ Shell` on macOS and Linux) opens a normal terminal in the project folder. Windows uses `pwsh` when PowerShell 7 is installed, otherwise Windows PowerShell. It is restored with the layout and carries the active account's settings, so `claude` typed there uses the same account |
+| Plain terminal | `+ PowerShell` (`+ Shell` on macOS and Linux) opens a normal terminal in the project folder. Windows uses `pwsh` when PowerShell 7 is installed, otherwise Windows PowerShell. It is restored with the layout and carries the active Claude and Codex accounts, so `claude` or `codex` typed there use those accounts |
 | Rename | Double-click the pane title, or right-click in the list |
 | Maximize | `⤢` on the pane |
 | Resize panes | Drag the lines between panes: vertical lines change widths, horizontal lines change row heights, double-click to even them out. Sizes are kept as ratios, so the panes still fill the window when it is resized, and they are restored on the next launch |
@@ -69,7 +69,7 @@ Platform notes:
 | Sidebar | Collapsed to a thin strip with a single `›` by default; hover to float the full sidebar over the panes. `‹` `›` or `Ctrl/⌘ + B` keeps it open or collapses it |
 | Copy, paste | `⌘C` `⌘V` on macOS; `Ctrl+Shift+C` `Ctrl+Shift+V` on Windows and Linux. `Ctrl+V` stays with Claude Code for pasting images |
 | Resume on another account, hand off | `⇄` on the pane |
-| Sign in, add or switch accounts | Account menu, top right |
+| Sign in, add or switch accounts | The Claude and Codex account menus, top right |
 | Theme, font size, font, language | Dashboard, Appearance |
 | Pane buttons | Shown when the mouse is over a pane or the pane has focus |
 
@@ -85,13 +85,35 @@ With a light theme such as Paper, run `/theme` in Claude Code and choose `Auto (
 
 ## Accounts
 
-The default account is your existing `~/.claude`. Nothing is moved.
+Claude and Codex accounts are managed separately. The top bar has two account menus, one per tool, each with its own list, sign-in and active account. A Claude pane uses the active Claude account, a Codex pane the active Codex account. Claude panes also get the active Codex account, so a Codex sub-agent started by Claude uses it too.
 
-Adding an account creates a new `CLAUDE_CONFIG_DIR` and opens a small terminal running `claude auth login`. With "share session history" checked (the default), the new account's `projects/`, `settings.json`, `CLAUDE.md`, `commands/`, `agents/` and `skills/` are symlinked (junctions on Windows) to `~/.claude`. When account A runs out, account B can `claude --resume` the same session with the full conversation.
+The default Claude account is your existing `~/.claude` and the default Codex account is your existing `~/.codex`. Nothing is moved.
 
-Switching the active account only affects new sessions. Open panes can be moved one at a time from `⇄`.
+- Adding a Claude account creates a new `CLAUDE_CONFIG_DIR` and opens a small terminal running `claude auth login`. With "share session history" checked (the default), its `projects/`, `settings.json`, `CLAUDE.md`, `commands/`, `agents/` and `skills/` are symlinked (junctions on Windows) to `~/.claude`.
+- Adding a Codex account creates a new `CODEX_HOME` and runs `codex login`. With "share session history" checked, its `sessions/`, `config.toml`, `AGENTS.md`, `session_index.jsonl` and prompt history point to `~/.codex`. The sign-in (`auth.json`) stays separate.
+
+If the browser shows a code instead of finishing the Claude sign-in on its own, paste it into the field under the small terminal. `Ctrl+V` also pastes in that terminal.
+
+Picking another account in a menu makes new sessions use it. If panes are still open on other accounts of that tool, the app asks whether to move them too.
 
 Only add accounts you own, and follow each service's terms.
+
+### When an account runs out
+
+Claude Code picks its account when it starts, and a running process cannot switch. Running `/login` in one window also replaces the sign-in for every window that shares the same config folder, and the other windows keep using the old token until they restart. That is why one exhausted account normally means typing `/login` in every window.
+
+Here every account has its own config folder, so different accounts can run side by side. When an account runs out, every pane on it, in every open project, moves to the account with the most usage left:
+
+1. Panes that were cut off by the limit, and idle panes, move right away: the process exits, and the same session resumes on the new account with `claude --resume <id>` (or `codex resume <id>`). The conversation is kept.
+2. A pane that was cut off gets a short message asking it to continue. You can turn this off with "Continue after switching".
+3. Panes that are still working keep running and move when they stop, so work in progress is not interrupted. The pane shows a note with a "Switch now" button.
+4. New sessions use the new account too.
+
+What counts as out of usage: a pane prints a usage-limit message (for example `You've hit your session limit`) and the account's usage confirms it, or the usage check every 2 minutes reports a 5-hour or weekly window at 100% while panes use that account. Text alone is not trusted, because the same words can just be on screen. If the usage cannot be read, the app asks instead of switching.
+
+"When usage runs out" in the dashboard settings: Ask (a bar at the top with one button that moves every pane), Switch account (automatic), or Do nothing.
+
+Before a Claude pane starts on a non-default account that shares history, the app copies a few things from `~/.claude.json` that are not covered by the shared folders: folder trust, user and local MCP servers, allowed tools and first-run setup. Without them the resumed session would stop at the "trust this folder?" dialog or be missing tools. The account's own values are never overwritten.
 
 ## Claude and Codex
 
@@ -99,15 +121,9 @@ The reasoning is in [docs/DESIGN.md](docs/DESIGN.md) (Traditional Chinese).
 
 Codex as a sub-agent: "Let Claude call Codex" in the account menu runs `claude mcp add --scope user codex -- codex mcp-server`. Claude can then start a Codex session with `codex` and continue it with `codex-reply`. Codex sessions started this way show up in the Codex tab with a sub-agent label, and you can open them to read or take over.
 
-When usage runs out, either because the pane prints a usage-limit message or because the usage API reports the 5-hour window at 100%, the pane shows these options:
-
-1. Resume the same session on another Claude account that still has usage.
-2. Write a handoff file and start Codex in the same pane, told to read it first.
-3. Once Claude resets, hand the work back from Codex the same way.
+Manual handoff: `⇄` on a pane can hand the work to the other tool. The app writes a handoff file and starts the other tool, told to read it first. Running out of usage never hands work to the other tool; it only switches accounts of the same tool.
 
 Handoff files go to `.multi-agent/handoffs/` in the project and contain the original request, the todo list, changed files, `git status`, `git diff --stat` and the last 12 messages. The folder is added to `.git/info/exclude`.
-
-In the dashboard settings you can choose Ask, Hand off automatically or Do nothing, and whether another account or Codex comes first.
 
 ## Panes talking to each other
 
@@ -141,9 +157,9 @@ The name you type for a new session, and any rename inside the app, is written b
 | Data | Source |
 | --- | --- |
 | Claude sessions, names, context | `~/.claude/projects/<encoded path>/<sessionId>.jsonl`. Names come from `/rename`, then the auto title, then the first prompt |
-| Codex sessions, context, usage | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| Codex sessions, context, usage | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`. With several Codex accounts sharing history, usage is read from each account's own open sessions |
 | Claude 5-hour and weekly usage | The OAuth usage endpoint behind Claude Code's `/usage`, with the token from `.credentials.json` or the macOS Keychain |
-| Account email | `oauthAccount` in `<config dir>/.claude.json` |
+| Account email | Claude: `oauthAccount` in `<config dir>/.claude.json`. Codex: the `id_token` in `$CODEX_HOME/auth.json` |
 | App settings and open panes | `state.json` in `~/Library/Application Support/multi-agent-cli` (macOS), `%APPDATA%\multi-agent-cli` (Windows) or `~/.config/multi-agent-cli` (Linux) |
 
 Context usage is `input + cache_creation + cache_read` tokens of the last main-thread reply divided by the context window: 200k by default, 1M when usage exceeds 200k or the model is marked 1M.
@@ -153,8 +169,9 @@ Context usage is `input + cache_creation + cache_read` tokens of the last main-t
 - The Claude usage endpoint is undocumented. If its format changes, the dashboard says usage could not be loaded and everything else keeps working.
 - macOS may ask for Keychain access the first time. Choose Always Allow.
 - With an expired token, usage is unavailable until you open any session on that account.
-- Codex usage comes from the last Codex reply, so it appears after you have used Codex once.
-- Limit detection matches terminal text. If a CLI changes its wording, update `LIMIT_PATTERNS` in `src/main/ptyManager.js`.
+- Codex usage comes from the last Codex reply, so it appears after you have used Codex once on that account.
+- Limit detection matches terminal text and then checks the usage numbers. If a CLI changes its wording, update `LIMIT_PATTERNS` in `src/main/ptyManager.js`.
+- Moving a pane restarts its process. Text typed into the input box but not sent is lost, and background tasks started inside that session stop. Shell panes keep the account they started with.
 - The Linux shortcut passes `--no-sandbox` because Electron installed from npm has no setuid `chrome-sandbox`.
 
 - Newer Codex versions can move sessions to a paginated, compressed format (after `codex migrate-rollouts --apply`). The app reads classic `rollout-*.jsonl` files only, so migrated sessions do not show up in the Codex tab.

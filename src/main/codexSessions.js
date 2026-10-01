@@ -195,6 +195,12 @@ function getRateLimits(codexHome = defaultCodexHome()) {
   return null;
 }
 
+// 單一 session 最新的額度。換帳號續跑時，session 檔最後幾筆額度就是目前這個帳號的
+function getSessionRateLimits(sessionId, codexHome = defaultCodexHome()) {
+  const f = findSessionFile(sessionId, codexHome);
+  return f ? rateLimitsFromEntries(readTail(f)) : null;
+}
+
 // 新開的 Codex session 事先不知道 id：找 since 之後在該 cwd 建立的 rollout
 function findNewSession(cwd, since, exclude = new Set(), codexHome = defaultCodexHome()) {
   for (const f of walkRollouts(path.join(codexHome, 'sessions'))) {
@@ -213,6 +219,7 @@ module.exports = {
   findSessionFile,
   getContext,
   getRateLimits,
+  getSessionRateLimits,
   findNewSession,
   contextFromEntries,
   rateLimitsFromEntries,

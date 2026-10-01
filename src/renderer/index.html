@@ -13,7 +13,9 @@
       <button id="projectBtn" class="project-btn"><span id="projectName"></span><span class="caret">▾</span></button>
       <div class="spacer"></div>
       <button id="dashBtn" class="ghost" data-i18n="top.dashboard"></button>
-      <button id="accountBtn" class="account-btn"><span class="avatar" id="accountAvatar"></span><span id="accountName"></span><span class="caret">▾</span></button>
+      <!-- Claude 與 Codex 的帳號分開登入、分開切換 -->
+      <button id="claudeAccountBtn" class="account-btn"><span class="tag claude">Claude</span><span class="avatar"></span><span class="acc-name"></span><span class="caret">▾</span></button>
+      <button id="codexAccountBtn" class="account-btn"><span class="tag codex">Codex</span><span class="avatar"></span><span class="acc-name"></span><span class="caret">▾</span></button>
     </header>
 
     <div id="layout">
@@ -45,6 +47,8 @@
       </aside>
 
       <main id="workspaces">
+        <!-- 帳號額度用完時的提示列：一個按鈕把所有用這個帳號的窗格換到另一個帳號 -->
+        <div id="relayBars" class="relay-bars"></div>
         <div id="empty" class="empty">
           <h2 data-i18n="empty.title"></h2>
           <p data-i18n="empty.body"></p>

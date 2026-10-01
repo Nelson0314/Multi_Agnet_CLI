@@ -5,8 +5,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   maxPanes: 6,
   platform: 'darwin',
-  profiles: [],
-  activeProfile: 'default',
+  // Claude 與 Codex 的帳號分開管理，各有自己的清單和目前帳號
+  accounts: { claude: { profiles: [], active: 'default' }, codex: { profiles: [], active: 'default' } },
   settings: {},
   cwd: null,
   workspaces: new Map(), // cwd -> { el, panes: [] }
@@ -15,7 +15,7 @@ const S = {
   search: '',
   usage: null,
   focused: null,
-  warnedLimit: new Set(),
+  handledOut: new Set(), // 已處理過的「帳號用完」（tool:id:重置時間），避免每次更新額度都再問一次
   lang: 'en',
 };
 const paneByPty = new Map();
@@ -26,7 +26,12 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const basename = (p) => (p || '').split(/[\\/]/).filter(Boolean).pop() || p;
 const shellLabel = () => (S.platform === 'win32' ? 'PowerShell' : 'Shell');
 const kindLabel = (k) => (k === 'codex' ? 'Codex' : k === 'shell' ? shellLabel() : 'Claude');
-const profileOf = (id) => S.profiles.find((p) => p.id === id) || S.profiles[0];
+// 窗格用哪個工具的帳號：Codex 窗格用 Codex 帳號，其他（Claude、shell）的 profileId 是 Claude 帳號
+const toolOf = (kind) => (kind === 'codex' ? 'codex' : 'claude');
+const toolLabel = (tool) => (tool === 'codex' ? 'Codex' : 'Claude');
+const accountsOf = (tool) => S.accounts[tool].profiles;
+const activeOf = (tool) => S.accounts[tool].active;
+const accountOf = (tool, id) => accountsOf(tool).find((p) => p.id === id) || accountsOf(tool)[0];
 
 // ---------------------------------------------------------------- i18n / theme
 function t(key, vars = {}) {
@@ -147,7 +152,7 @@ function bar(pct) {
   return `<div class="bar ${barClass(v)}"><i style="width:${v}%"></i></div>`;
 }
 function initials(p) {
-  const s = (p.account && p.account.email) || profileName(p) || '?';
+  const s = (p && ((p.account && p.account.email) || profileName(p))) || '?';
   return s.trim()[0].toUpperCase();
 }
 
@@ -225,7 +230,8 @@ function promptModal(title, { value = '', placeholder = '', hint = '' } = {}) {
 }
 
 // ---------------------------------------------------------------- terminals
-function makeTerminal(container, getPtyId) {
+// plainPaste：Ctrl+V 直接貼上文字（登入視窗用，不需要保留給 Claude Code 貼圖片）
+function makeTerminal(container, getPtyId, { plainPaste = false } = {}) {
   const term = new Terminal({
     ...termOptions(),
     cursorBlink: true,
@@ -258,7 +264,7 @@ function makeTerminal(container, getPtyId) {
       api.clipboardWrite(term.getSelection());
       return false;
     }
-    if (mod && k === 'v') {
+    if ((mod || (plainPaste && (e.ctrlKey || e.metaKey))) && k === 'v') {
       term.paste(api.clipboardRead());
       return false;
     }
@@ -285,8 +291,11 @@ function makeTerminal(container, getPtyId) {
 
 api.onData((id, data) => {
   const p = paneByPty.get(id);
-  if (p) p.term.write(data);
-  else pendingData.set(id, (pendingData.get(id) || '') + data);
+  if (p) {
+    p.lastData = Date.now(); // 用來判斷窗格是否閒置（agent 工作中會一直有輸出）
+    p.term.write(data);
+    if (p.onData) p.onData(data);
+  } else pendingData.set(id, (pendingData.get(id) || '') + data);
 });
 api.onExit((id, code) => {
   const p = paneByPty.get(id);
@@ -296,9 +305,9 @@ api.onExit((id, code) => {
   p.el.classList.add('exited');
   p.term.write(`\r\n\x1b[90m${t('pane.exited', { code })}\x1b[0m\r\n`);
 });
-api.onLimit((id, text) => {
+api.onLimit((id) => {
   const p = paneByPty.get(id);
-  if (p) handleLimit(p, text);
+  if (p && p.kind) onLimitText(p);
 });
 // 窗格互通：主程式來問窗格順序、畫面文字，或通知有訊息進來
 api.onBridgeAsk(async (reqId, method, args) => {
@@ -514,7 +523,7 @@ function paneTitle(p) {
 }
 
 function renderPaneHead(p) {
-  const prof = profileOf(p.profileId);
+  const prof = p.kind === 'shell' ? null : accountOf(toolOf(p.kind), p.profileId);
   const head = $('.pane-head', p.el);
   $('.tag.kind', head).className = `tag kind ${p.kind}`;
   $('.tag.kind', head).textContent = kindLabel(p.kind);
@@ -525,7 +534,7 @@ function renderPaneHead(p) {
   }
   const pt = $('.tag.profile', head);
   pt.textContent = prof ? profileName(prof) : '';
-  pt.hidden = p.kind !== 'claude' || S.profiles.length < 2;
+  pt.hidden = !prof || accountsOf(toolOf(p.kind)).length < 2;
   p.el.className = `pane ${p.kind} ${S.focused === p ? 'focused' : ''} ${p.max ? 'max' : ''} ${p.exited ? 'exited' : ''}`;
 }
 
@@ -637,6 +646,8 @@ async function startPty(p, { prompt } = {}) {
     runCwd: p.runCwd || null,
     sessionId: p.sessionId,
     profileId: p.profileId,
+    // shell 記住開啟時的 Codex 帳號；Claude 窗格每次啟動都用目前的 Codex 帳號
+    codexProfileId: p.kind === 'shell' ? p.codexProfileId || null : null,
     name: p.sessionId ? undefined : p.name,
     prompt,
     cols: p.term.cols,
@@ -645,6 +656,8 @@ async function startPty(p, { prompt } = {}) {
   p.id = r.paneId;
   p.sessionId = r.sessionId || p.sessionId;
   p.profileId = r.profileId;
+  p.codexProfileId = r.codexProfileId || null;
+  p.startedAt = p.lastData = Date.now();
   paneByPty.set(p.id, p);
   const buffered = pendingData.get(p.id);
   if (buffered) {
@@ -654,13 +667,13 @@ async function startPty(p, { prompt } = {}) {
 }
 
 // cwd：窗格屬於哪個專案；runCwd：程式實際執行的資料夾（子資料夾或 worktree 裡的 session 要在原本的位置續跑）
-async function spawnPane({ kind, sessionId = null, name = null, prompt = null, profileId = null, cwd = S.cwd, runCwd = null }) {
+async function spawnPane({ kind, sessionId = null, name = null, prompt = null, profileId = null, codexProfileId = null, cwd = S.cwd, runCwd = null }) {
   const w = workspaceFor(cwd);
   if (w.panes.length >= S.maxPanes) {
     toast(t('err.E_MAX_PANES', { max: S.maxPanes }), 'bad');
     return null;
   }
-  const p = { id: null, kind, cwd, runCwd, sessionId, name, profileId: profileId || S.activeProfile, context: null, exited: false, max: false };
+  const p = { id: null, kind, cwd, runCwd, sessionId, name, profileId: profileId || activeOf(toolOf(kind)), codexProfileId, context: null, exited: false, max: false };
   w.el.appendChild(createPaneEl(p));
   w.panes.push(p);
   layoutGrid(w);
@@ -686,7 +699,7 @@ async function restartPane(p, { kind = p.kind, sessionId = p.sessionId, profileI
     paneByPty.delete(p.id);
     await api.kill(p.id);
   }
-  Object.assign(p, { id: null, kind, sessionId, profileId, name, exited: false, context: null });
+  Object.assign(p, { id: null, kind, sessionId, profileId, name, exited: false, context: null, limitHit: false, pendingMove: null });
   hideBanner(p);
   p.term.reset();
   renderPaneHead(p);
@@ -732,47 +745,95 @@ function saveLayout(cwd) {
       sessionId: p.sessionId,
       profileId: p.profileId,
       ...(p.runCwd ? { runCwd: p.runCwd } : {}),
-      ...(p.kind === 'shell' ? { name: p.name } : {}),
+      ...(p.kind === 'shell' ? { name: p.name, codexProfileId: p.codexProfileId } : {}),
     })),
     w.savedSizes || null,
   );
 }
 
-// ---------------------------------------------------------------- fallback / handoff
-function otherProfileOptions(p) {
-  return S.profiles
-    .filter((x) => x.id !== p.profileId)
-    .map((x) => {
-      const u = S.usage && S.usage.claude[x.id];
-      const ok = u && u.ok;
-      const exhausted = ok && ((u.fiveHour && u.fiveHour.pct >= 100) || (u.sevenDay && u.sevenDay.pct >= 100));
-      const note = ok ? usageNote(u) : t('limit.unknown');
-      return { profile: x, viable: !exhausted && (ok || (x.account && x.account.email)), note };
-    });
-}
+// ---------------------------------------------------------------- 換帳號接力
+// 一個帳號的額度用完時，把所有用這個帳號的窗格（不分專案）一次換到另一個還有額度的帳號：
+// 結束舊程式、用新帳號 --resume 同一個 session，對話完整保留，不用在每個視窗裡打 /login。
+// Claude Code 在啟動時決定帳號，執行中的程式換不了，所以「換帳號」一定是重新開啟同一個 session。
 
-function usageNote(u) {
-  return `${t('usage.5h')} ${Math.round(u.fiveHour ? u.fiveHour.pct : 0)}% · ${t('usage.week')} ${Math.round(u.sevenDay ? u.sevenDay.pct : 0)}%`;
-}
+const OUT_PCT = 99; // 用量到這裡就當成用完
+const FRESH_MS = 15 * 60_000; // 額度資料超過這個時間就不拿來判斷「還有額度」
+const IDLE_MS = 3000; // 窗格這麼久沒有輸出就當成閒置（agent 工作中，畫面會一直更新）
+const GRACE_MS = 20_000; // 換帳號剛開的窗格會重播舊對話（含舊的額度訊息），這段時間內只認額度資料
 
-function fallbackActions(p) {
-  const acts = [];
-  if (p.kind === 'claude') {
-    for (const o of otherProfileOptions(p)) {
-      if (!o.viable) continue;
-      acts.push({
-        type: 'other-profile',
-        label: t('limit.otherProfile', { name: profileName(o.profile), note: o.note }),
-        run: () => switchProfile(p, o.profile.id),
-      });
-    }
-    acts.push({ type: 'codex', label: t('limit.toCodex'), run: () => handoff(p, 'codex', { inPlace: true, reason: 'claude-limit' }) });
-  } else if (p.kind === 'codex') {
-    acts.push({ type: 'claude', label: t('limit.toClaude'), run: () => handoff(p, 'claude', { inPlace: true, reason: 'codex-limit' }) });
+// 這個帳號目前的額度視窗（5 小時、每週…），讀不到時回傳 null。
+// 判斷用完與否只用最近的資料；anyAge：顯示用，較舊的資料也可以
+function quotaWindows(tool, id, { model = false, anyAge = false } = {}) {
+  const u = S.usage && S.usage[tool] && S.usage[tool][id];
+  if (!u) return null;
+  const fresh = (at) => anyAge || (at && Date.now() - at < FRESH_MS);
+  const wins = [];
+  if (tool === 'codex') {
+    if (fresh(u.observedAt)) wins.push(u.primary, u.secondary);
+  } else {
+    if (u.ok && fresh(u.fetchedAt)) wins.push(u.fiveHour, u.sevenDay, ...(model ? [u.sevenDayOpus, u.sevenDaySonnet] : []));
+    if (u.live && fresh(u.live.at)) wins.push(u.live.fiveHour, u.live.sevenDay);
   }
-  const order = S.settings.fallbackOrder || ['other-profile', 'codex'];
-  return acts.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
+  const known = wins.filter((w) => w && w.pct != null && !(w.resetsAt && w.resetsAt <= Date.now()));
+  return known.length ? known : null;
 }
+
+// 'out'：確定用完；'ok'：確定還有；'unknown'：沒有最近的額度資料
+function quotaState(tool, id, opts) {
+  const wins = quotaWindows(tool, id, opts);
+  if (!wins) return 'unknown';
+  return wins.some((w) => w.pct >= OUT_PCT) ? 'out' : 'ok';
+}
+
+function quotaLeft(tool, id) {
+  const wins = quotaWindows(tool, id);
+  return wins ? Math.max(0, 100 - Math.max(...wins.map((w) => w.pct))) : null;
+}
+
+// 最早什麼時候恢復（用完的視窗裡最晚重置的那個）
+function quotaReset(tool, id) {
+  const wins = (quotaWindows(tool, id, { model: true }) || []).filter((w) => w.pct >= OUT_PCT && w.resetsAt);
+  return wins.length ? Math.max(...wins.map((w) => w.resetsAt)) : null;
+}
+
+function signedIn(tool, p) {
+  const a = p.account || {};
+  if (tool === 'codex') return !!(a.email || a.apiKey || (S.usage && S.usage.codex && S.usage.codex[p.id]));
+  const u = S.usage && S.usage.claude[p.id];
+  return !!(a.email || (u && u.ok));
+}
+
+// 其他帳號：還有額度、已登入的排前面，剩最多的優先
+function otherAccounts(tool, excludeId) {
+  return accountsOf(tool)
+    .filter((p) => p.id !== excludeId)
+    .map((p) => {
+      const st = quotaState(tool, p.id);
+      return { profile: p, state: st, left: quotaLeft(tool, p.id), viable: st !== 'out' && signedIn(tool, p), note: usageNote(tool, p.id) };
+    })
+    .sort((a, b) => b.viable - a.viable || (b.left ?? -1) - (a.left ?? -1));
+}
+
+function bestAccount(tool, excludeId) {
+  const o = otherAccounts(tool, excludeId)[0];
+  return o && o.viable ? o.profile : null;
+}
+
+function usageNote(tool, id) {
+  const wins = quotaWindows(tool, id, { anyAge: true });
+  if (!wins) return t('limit.unknown');
+  const u = S.usage[tool][id];
+  const left = (w) => (w && w.pct != null ? Math.round(Math.max(0, 100 - w.pct)) : '–');
+  const [five, week] = tool === 'codex' ? [u.primary, u.secondary] : [u.ok ? u.fiveHour : u.live && u.live.fiveHour, u.ok ? u.sevenDay : u.live && u.live.sevenDay];
+  return t('usage.note', { a: left(five), b: left(week) });
+}
+
+// 用這個帳號、還在跑的窗格（所有專案）
+function panesOn(tool, id) {
+  return allPanes().filter((p) => p.kind === tool && p.profileId === id && !p.exited);
+}
+
+const isIdle = (p) => Date.now() - (p.lastData || 0) >= IDLE_MS;
 
 function hideBanner(p) {
   const b = $('.pane-banner', p.el);
@@ -780,47 +841,217 @@ function hideBanner(p) {
   b.innerHTML = '';
 }
 
-function handleLimit(p, text) {
-  if (p.kind === 'shell') return;
-  refreshUsage(true);
-  if (S.settings.fallback === 'off') return;
-  const acts = fallbackActions(p);
-  if (S.settings.fallback === 'auto' && acts.length) {
-    toast(t('limit.auto', { name: paneTitle(p), action: acts[0].label }));
-    acts[0].run();
-    return;
-  }
+function paneBanner(p, msg, buttons = []) {
   const b = $('.pane-banner', p.el);
-  b.innerHTML = `<span class="msg">${esc(t('limit.banner', { kind: kindLabel(p.kind) }))}</span>`;
-  for (const a of acts) {
-    const btn = document.createElement('button');
-    btn.textContent = a.label;
-    btn.onclick = () => {
+  b.innerHTML = `<span class="msg">${esc(msg)}</span>`;
+  for (const btn of buttons) {
+    const el = document.createElement('button');
+    el.textContent = btn.label;
+    if (btn.ghost) el.className = 'ghost';
+    el.onclick = () => {
       hideBanner(p);
-      a.run();
+      btn.run();
     };
-    b.appendChild(btn);
+    b.appendChild(el);
   }
-  const ig = document.createElement('button');
-  ig.className = 'ghost';
-  ig.textContent = t('limit.ignore');
-  ig.onclick = () => {
-    hideBanner(p);
-    if (p.id) api.resetLimit(p.id);
-  };
-  b.appendChild(ig);
   b.hidden = false;
 }
 
-async function switchProfile(p, profileId) {
-  const target = profileOf(profileId);
-  if (!p.sessionId) return toast(t('handoff.noId'), 'bad');
-  if (target.id !== 'default' && !target.shareHistory) {
-    toast(t('switch.noHistory', { name: profileName(target) }));
-    return handoff(p, 'claude', { inPlace: true, profileId, reason: 'switch-profile' });
+// 窗格輸出出現額度用完的訊息：先用額度資料確認，避免把畫面上剛好出現的文字當真
+async function onLimitText(p) {
+  if (p.kind !== 'claude' && p.kind !== 'codex') return;
+  const tool = toolOf(p.kind);
+  const ptyId = p.id;
+  const account = p.profileId;
+  const young = Date.now() - (p.startedAt || 0) < GRACE_MS;
+  // 先標記：確認額度的這段時間裡，如果別的窗格已經把整個帳號換掉，這格換過去後要接著「繼續」
+  if (!young) p.limitHit = true;
+  await refreshUsage(true, { check: false });
+  if (p.id !== ptyId) return; // 等待期間已經換帳號重開了
+  const st = quotaState(tool, account, { model: true });
+  // 資料顯示還有額度，或剛開啟時重播的舊訊息：不是真的用完，重新開始偵測
+  if (st === 'ok' || (young && st !== 'out')) {
+    p.limitHit = false;
+    if (p.id) api.resetLimit(p.id);
+    return;
   }
-  toast(t('switch.started', { name: profileName(target), title: paneTitle(p) }), 'ok');
-  await restartPane(p, { profileId });
+  p.limitHit = true; // 這格的回覆被額度打斷，換帳號後要叫它繼續
+  if (p.pendingMove) return movePane(p, p.pendingMove);
+  if (S.settings.fallback === 'off') return;
+  accountOut(tool, account, { confirmed: st === 'out' });
+}
+
+// 帳號用完：自動模式直接換；詢問模式顯示提示列；讀不到額度時一律先問
+function accountOut(tool, id, { confirmed }) {
+  const target = bestAccount(tool, id);
+  if (confirmed && S.settings.fallback === 'auto' && target) {
+    toast(t('relay.auto', { tool: toolLabel(tool), from: profileName(accountOf(tool, id)), to: profileName(target) }));
+    return moveAccount(tool, id, target.id);
+  }
+  showRelayBar(tool, id, { confirmed });
+}
+
+// 定期檢查（每次更新額度後）：有窗格在用、而且確定用完的帳號
+function checkAccounts() {
+  if (!S.usage || S.settings.fallback === 'off') return;
+  for (const tool of ['claude', 'codex']) {
+    for (const a of accountsOf(tool)) {
+      if (quotaState(tool, a.id) !== 'out') continue;
+      const key = `${tool}:${a.id}:${quotaReset(tool, a.id) || ''}`;
+      if (S.handledOut.has(key)) continue;
+      const open = panesOn(tool, a.id);
+      if (open.length) {
+        S.handledOut.add(key);
+        accountOut(tool, a.id, { confirmed: true });
+      } else if (a.id === activeOf(tool)) {
+        // 沒有窗格在用，但它是新 session 會用的帳號：自動模式直接改用別的帳號，否則提醒一次
+        S.handledOut.add(key);
+        const alt = bestAccount(tool, a.id);
+        const reset = fmtReset(quotaReset(tool, a.id));
+        if (alt && S.settings.fallback === 'auto') {
+          setActiveAccount(tool, alt.id).then(() => toast(t('relay.activeSwitched', { tool: toolLabel(tool), from: profileName(a), to: profileName(alt), t: reset }), 'ok', 9000));
+        } else {
+          toast(t('limit.toast', { name: `${toolLabel(tool)} · ${profileName(a)}`, t: reset || '–' }) + (alt ? `\n${t('limit.toastAlt', { alt: profileName(alt) })}` : ''), 'bad', 12000);
+        }
+      }
+    }
+  }
+}
+
+// 畫面上方的提示列：每個用完的帳號一列，一個按鈕把所有用它的窗格換到另一個帳號
+function showRelayBar(tool, id, { confirmed }) {
+  const holder = $('#relayBars');
+  const barId = `relay-${tool}-${id}`;
+  let bar = document.getElementById(barId);
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = barId;
+    bar.className = 'relay-bar';
+    holder.appendChild(bar);
+  }
+  const from = accountOf(tool, id);
+  const n = panesOn(tool, id).length;
+  const reset = fmtReset(quotaReset(tool, id));
+  const msg = confirmed
+    ? t('relay.out', { tool: toolLabel(tool), name: profileName(from), n, reset: reset ? t('relay.reset', { t: reset }) : '' })
+    : t('relay.maybe', { tool: toolLabel(tool), name: profileName(from), n });
+  bar.innerHTML = `<span class="msg">${esc(msg)}</span>`;
+  const add = (label, run, cls = '') => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = cls;
+    b.onclick = () => {
+      bar.remove();
+      run();
+    };
+    bar.appendChild(b);
+  };
+  const viable = otherAccounts(tool, id).filter((o) => o.viable);
+  if (viable.length) {
+    viable.slice(0, 3).forEach((o, i) => add(t('relay.move', { n, name: profileName(o.profile), note: o.note }), () => moveAccount(tool, id, o.profile.id), i === 0 ? 'primary' : ''));
+  } else {
+    bar.insertAdjacentHTML('beforeend', `<span class="sub">${esc(t('relay.none', { tool: toolLabel(tool) }))}</span>`);
+    add(t('profile.add'), () => addProfileFlow(tool));
+  }
+  add(t('limit.ignore'), () => {
+    for (const p of panesOn(tool, id)) if (p.id) api.resetLimit(p.id);
+  }, 'ghost');
+}
+
+function hideRelayBar(tool, id) {
+  const bar = document.getElementById(`relay-${tool}-${id}`);
+  if (bar) bar.remove();
+}
+
+// 提示列佔用的高度，工作區往下讓出這麼多（窗格各自的 ResizeObserver 會重新 fit 終端機）
+new ResizeObserver(() => document.documentElement.style.setProperty('--relay-h', `${$('#relayBars').offsetHeight}px`)).observe($('#relayBars'));
+
+// 帳號已經沒有窗格在用（例如從窗格選單一個個換掉了）就收起它的提示列
+function pruneRelayBars() {
+  for (const tool of TOOLS) for (const a of accountsOf(tool)) if (!panesOn(tool, a.id).length) hideRelayBar(tool, a.id);
+}
+
+// 把一個帳號的所有窗格換到另一個帳號；新 session 也改用它
+async function moveAccount(tool, fromId, toId) {
+  hideRelayBar(tool, fromId);
+  if (activeOf(tool) === fromId) await setActiveAccount(tool, toId);
+  return movePanes(panesOn(tool, fromId), toId);
+}
+
+// 閒置或已經被額度打斷的窗格馬上換；還在工作的等它停下來（做完或也撞到額度）再換，不打斷進行中的工作
+async function movePanes(list, toId) {
+  let now = 0;
+  let later = 0;
+  const moving = [];
+  for (const p of list) {
+    if (!p.sessionId) continue; // Codex 新 session 還沒找到 id，沒辦法續跑
+    if (p.limitHit || isIdle(p)) {
+      now++;
+      moving.push(movePane(p, toId));
+    } else {
+      later++;
+      p.pendingMove = toId;
+      const target = accountOf(toolOf(p.kind), toId);
+      paneBanner(p, t('relay.pending', { name: profileName(target) }), [
+        { label: t('relay.now'), run: () => movePane(p, toId) },
+        { label: t('modal.cancel'), ghost: true, run: () => (p.pendingMove = null) },
+      ]);
+    }
+  }
+  if (now || later) {
+    const to = profileName(accountOf(toolOf(list[0].kind), toId));
+    toast(t('relay.done', { n: now, name: to }) + (later ? `\n${t('relay.later', { n: later })}` : ''), 'ok', 8000);
+  }
+  await Promise.all(moving);
+  pruneRelayBars();
+}
+
+setInterval(() => {
+  for (const p of allPanes()) {
+    if (!p.pendingMove || p.exited || !(p.limitHit || isIdle(p))) continue;
+    // 等待期間目標帳號也用完了：改選另一個，沒有就留在原帳號（提示列會說明）
+    if (quotaState(toolOf(p.kind), p.pendingMove) === 'out') {
+      const alt = bestAccount(toolOf(p.kind), p.profileId);
+      if (!alt) {
+        p.pendingMove = null;
+        hideBanner(p);
+        continue;
+      }
+      p.pendingMove = alt.id;
+    }
+    movePane(p, p.pendingMove).then(pruneRelayBars);
+  }
+}, 1000);
+
+function continuePrompt() {
+  return t('relay.continue');
+}
+
+// 換帳號續跑同一個 session。被額度打斷的窗格（設定開啟時）會附上「繼續」，接著做完被打斷的回覆
+async function movePane(p, profileId) {
+  if (p.moving) return; // 提示列、自動模式、等待中的窗格可能同時觸發，只換一次
+  const tool = toolOf(p.kind);
+  const target = accountOf(tool, profileId);
+  const prompt = p.limitHit && S.settings.limitContinue !== false ? continuePrompt() : null;
+  p.pendingMove = null;
+  hideBanner(p);
+  if (!p.sessionId) return toast(t('handoff.noId'), 'bad');
+  p.moving = true;
+  try {
+    if (target.id !== 'default' && !target.shareHistory) {
+      toast(t('switch.noHistory', { name: profileName(target) }));
+      await handoff(p, p.kind, { inPlace: true, profileId, reason: 'switch-profile' });
+    } else {
+      await restartPane(p, { profileId, prompt });
+    }
+  } finally {
+    p.moving = false;
+  }
+}
+
+async function switchProfile(p, profileId) {
+  toast(t('switch.started', { name: profileName(accountOf(toolOf(p.kind), profileId)), title: paneTitle(p) }), 'ok');
+  await movePane(p, profileId);
 }
 
 async function handoff(p, toKind, { inPlace = false, profileId = null, reason = 'manual' } = {}) {
@@ -831,21 +1062,25 @@ async function handoff(p, toKind, { inPlace = false, profileId = null, reason = 
   } catch (e) {
     return toast(t('handoff.failed', { msg: errMsg(e) }), 'bad');
   }
-  const name = `${paneTitle(p).replace(/ → (Claude|Codex)$/, '')} → ${kindLabel(toKind)}`;
+  const name = toKind === p.kind ? paneTitle(p) : `${paneTitle(p).replace(/ → (Claude|Codex)$/, '')} → ${kindLabel(toKind)}`;
+  // 換到另一個工具時，用那個工具目前的帳號
+  const account = profileId || (toolOf(toKind) === toolOf(p.kind) ? p.profileId : activeOf(toolOf(toKind)));
   toast(t('handoff.started', { kind: kindLabel(toKind) }), 'ok');
-  if (inPlace) await restartPane(p, { kind: toKind, sessionId: null, prompt: r.prompt, name, profileId: profileId || p.profileId });
-  else await spawnPane({ kind: toKind, prompt: r.prompt, name, cwd: p.cwd, profileId });
+  if (inPlace) await restartPane(p, { kind: toKind, sessionId: null, prompt: r.prompt, name, profileId: account });
+  else await spawnPane({ kind: toKind, prompt: r.prompt, name, cwd: p.cwd, profileId: account });
 }
 
 function paneMenu(p) {
   const items = [];
-  if (p.kind === 'claude') {
-    for (const o of otherProfileOptions(p)) {
+  if (p.kind === 'claude' || p.kind === 'codex') {
+    for (const o of otherAccounts(p.kind, p.profileId)) {
       items.push({
         html: `${esc(t('pane.continueWith', { name: profileName(o.profile) }))} <span class="sub">${esc(o.note)}</span>`,
         onClick: () => switchProfile(p, o.profile.id),
       });
     }
+  }
+  if (p.kind === 'claude') {
     items.push({ label: t('pane.toCodexNew'), onClick: () => handoff(p, 'codex') });
     items.push({ label: t('pane.toCodexHere'), onClick: () => handoff(p, 'codex', { inPlace: true }) });
   } else if (p.kind === 'codex') {
@@ -874,7 +1109,7 @@ async function openProject(cwd, { restore = true } = {}) {
   if (!existed && restore && S.settings.autoRestore && info.panes.length) {
     for (const saved of info.panes) {
       if (saved.kind === 'shell') {
-        await spawnPane({ kind: 'shell', name: saved.name || null, profileId: saved.profileId, cwd });
+        await spawnPane({ kind: 'shell', name: saved.name || null, profileId: saved.profileId, codexProfileId: saved.codexProfileId || null, cwd });
         continue;
       }
       const s = findSession(saved.kind, saved.sessionId);
@@ -946,7 +1181,7 @@ function renderSessionList() {
           onClick: async () => {
             const n = await promptModal(t('rename.session'), { value: sessionTitle(s) });
             if (n) {
-              await api.setName(S.cwd, s.id, n, s.kind, S.activeProfile);
+              await api.setName(S.cwd, s.id, n, s.kind, activeOf(toolOf(s.kind)));
               refreshSessions();
             }
           },
@@ -1035,89 +1270,170 @@ async function renderRecent() {
 }
 
 // ---------------------------------------------------------------- accounts
+// Claude 與 Codex 的帳號分開：上方兩個帳號按鈕各管各的清單、登入和目前帳號
+const TOOLS = ['claude', 'codex'];
+
 async function reloadProfiles() {
-  const r = await api.listProfiles();
-  S.profiles = r.profiles;
-  S.activeProfile = r.activeProfile;
+  S.accounts = await api.listProfiles();
   renderAccount();
   for (const w of S.workspaces.values()) w.panes.forEach(renderPaneHead);
 }
 
 function renderAccount() {
-  const p = profileOf(S.activeProfile);
-  $('#accountAvatar').textContent = initials(p);
-  $('#accountName').textContent = p.account && p.account.email ? `${profileName(p)} · ${p.account.email}` : profileName(p);
+  for (const tool of TOOLS) {
+    const btn = $(`#${tool}AccountBtn`);
+    const p = accountOf(tool, activeOf(tool));
+    const email = p && p.account && p.account.email;
+    $('.avatar', btn).textContent = initials(p);
+    $('.acc-name', btn).textContent = email ? `${profileName(p)} · ${email}` : profileName(p);
+    btn.title = t('profile.menuTip', { tool: toolLabel(tool) });
+  }
 }
 
-function showAccountMenu(anchor) {
-  const items = S.profiles.map((p) => {
-    const u = S.usage && S.usage.claude[p.id];
-    const note = u && u.ok ? usageNote(u) : u && u.reason !== 'no-credentials' ? t(`usage.reason.${u.reason}`) : '';
+async function setActiveAccount(tool, id) {
+  S.accounts = await api.setActiveProfile(tool, id);
+  renderAccount();
+  for (const w of S.workspaces.values()) w.panes.forEach(renderPaneHead);
+  refreshSessions();
+  renderDashboard();
+}
+
+// 開著、可以換帳號續跑的窗格（不分專案）
+function movablePanes(tool, exceptId) {
+  return allPanes().filter((p) => p.kind === tool && p.profileId !== exceptId && !p.exited && p.sessionId);
+}
+
+// 從帳號選單選了另一個帳號：之後新開的 session 用它；有窗格在用別的帳號時，問要不要一起換過去
+async function chooseAccount(tool, id) {
+  await setActiveAccount(tool, id);
+  const name = profileName(accountOf(tool, id));
+  const others = movablePanes(tool, id);
+  if (!others.length) return toast(t('profile.switched', { name }), 'ok');
+  const move = await modal(
+    `<h3>${esc(t('move.title', { tool: toolLabel(tool), name }))}</h3><div class="hint">${esc(t('move.hint', { n: others.length, name }))}</div>
+     <div class="actions"><button id="mCancel">${esc(t('move.onlyNew'))}</button><button id="mOk" class="primary">${esc(t('move.submit', { n: others.length }))}</button></div>`,
+    (card, close) => {
+      $('#mCancel', card).onclick = () => close(false);
+      $('#mOk', card).onclick = () => close(true);
+    },
+  );
+  if (move) movePanes(others, id);
+  else toast(t('profile.switched', { name }), 'ok');
+}
+
+function accountNote(tool, p) {
+  if (!signedIn(tool, p)) return '';
+  const u = S.usage && S.usage[tool] && S.usage[tool][p.id];
+  if (tool === 'claude' && u && !u.ok && u.reason !== 'no-credentials' && !quotaWindows(tool, p.id)) return t(`usage.reason.${u.reason}`);
+  return usageNote(tool, p.id);
+}
+
+function showAccountMenu(tool, anchor) {
+  const active = activeOf(tool);
+  const items = accountsOf(tool).map((p) => {
+    const note = accountNote(tool, p);
     return {
-      active: p.id === S.activeProfile,
-      html: `<span class="avatar">${esc(initials(p))}</span><div style="flex:1"><div>${esc(profileName(p))}${p.id === S.activeProfile ? ' ✓' : ''}</div><div class="sub">${esc(
-        (p.account && p.account.email) || t('profile.notLoggedIn'),
+      active: p.id === active,
+      html: `<span class="avatar">${esc(initials(p))}</span><div style="flex:1"><div>${esc(profileName(p))}${p.id === active ? ' ✓' : ''}</div><div class="sub">${esc(
+        (p.account && (p.account.email || (p.account.apiKey && 'API key'))) || t('profile.notLoggedIn'),
       )}${note ? ` · ${esc(note)}` : ''}</div></div>`,
-      onClick: async () => {
-        await api.setActiveProfile(p.id);
-        await reloadProfiles();
-        refreshSessions();
-        renderDashboard();
-        toast(t('profile.switched', { name: profileName(p) }), 'ok');
-      },
+      onClick: () => chooseAccount(tool, p.id),
     };
   });
-  const cur = profileOf(S.activeProfile);
+  const cur = accountOf(tool, active);
   items.push(
     '-',
-    { label: t('profile.login', { name: profileName(cur) }), onClick: () => loginModal(cur) },
-    { label: t('profile.add'), onClick: addProfileFlow },
-    { label: t('profile.rename', { name: profileName(cur) }), onClick: renameProfileFlow },
+    { label: t('profile.login', { name: profileName(cur) }), onClick: () => loginModal(tool, cur) },
+    { label: t('profile.add'), onClick: () => addProfileFlow(tool) },
+    { label: t('profile.rename', { name: profileName(cur) }), onClick: () => renameProfileFlow(tool) },
   );
-  if (cur.id !== 'default') items.push({ label: t('profile.remove', { name: profileName(cur) }), onClick: removeProfileFlow });
-  items.push(
-    '-',
-    { label: t('profile.installMcp'), onClick: installMcp },
-    { label: t('profile.installBridge'), onClick: installBridge },
-    { label: t('profile.codexLogin'), onClick: () => loginModal(cur, 'codex-login') },
-  );
+  if (cur.id !== 'default') items.push({ label: t('profile.remove', { name: profileName(cur) }), onClick: () => removeProfileFlow(tool) });
+  const others = movablePanes(tool, cur.id);
+  if (others.length) items.push({ label: t('profile.moveHere', { n: others.length, name: profileName(cur) }), onClick: () => movePanes(others, cur.id) });
+  items.push('-', tool === 'claude' ? { label: t('profile.installMcp'), onClick: installMcp } : { label: t('profile.installBridge'), onClick: installBridge });
   showPopover(anchor, items);
 }
 
+const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[@-_]/g;
+
 // 在 modal 裡開一個小終端機跑 `claude auth login`（或 `codex login`），完成後自動關閉
-function loginModal(profile, kind = 'login') {
+function loginModal(tool, profile) {
+  const claude = tool === 'claude';
   return modal(
-    `<h3>${esc(t(kind === 'login' ? 'login.claude' : 'login.codex', { name: profileName(profile) }))}</h3>
-     <div class="hint">${esc(t('login.hint'))}</div>
+    `<h3>${esc(t(claude ? 'login.claude' : 'login.codex', { name: profileName(profile) }))}</h3>
+     <div class="hint">${esc(t(claude ? 'login.hint' : 'login.hintCodex'))}</div>
      <div id="loginTerm" class="login-term"></div>
+     ${
+       claude
+         ? `<div class="login-code"><input id="loginCode" placeholder="${esc(t('login.codePlaceholder'))}" /><button id="loginSend">${esc(t('login.codeSubmit'))}</button></div>`
+         : ''
+     }
      <div class="actions"><button id="mClose">${esc(t('modal.close'))}</button></div>`,
     async (card, close) => {
       const holder = { id: null, onExit: null };
-      const t = makeTerminal($('#loginTerm', card), () => holder.id);
+      // 變數不要取名 t：會蓋掉翻譯函式 t()，登入結束時呼叫 t('login.done') 就會出錯、視窗關不掉
+      const tm = makeTerminal($('#loginTerm', card), () => holder.id, { plainPaste: true });
+      let finished = false;
+      let enterTimer = null;
+      // 從瀏覽器授權完回來時，鍵盤焦點常常不在這個小終端機上
+      const refocus = () => tm.term.focus();
       const finish = async () => {
+        if (finished) return;
+        finished = true;
+        window.removeEventListener('focus', refocus);
+        clearTimeout(enterTimer);
         if (holder.id) {
           paneByPty.delete(holder.id);
           api.kill(holder.id);
         }
-        t.ro.disconnect();
-        t.term.dispose();
+        tm.ro.disconnect();
+        tm.term.dispose();
         close();
         await reloadProfiles();
         refreshUsage(true);
       };
+      window.addEventListener('focus', refocus);
       $('#mClose', card).onclick = finish;
-      Object.assign(holder, t, {
-        onExit: (code) => {
-          toast(code === 0 ? t('login.done') : t('login.exit', { code }), code === 0 ? 'ok' : 'bad');
+      // 瀏覽器沒有自動導回、而是顯示一串授權碼時：貼在這裡送出（等同在終端機的 Paste code here 輸入）
+      const code = $('#loginCode', card);
+      if (code) {
+        const submit = () => {
+          const v = code.value.trim();
+          if (!v || !holder.id) return;
+          api.write(holder.id, v);
+          setTimeout(() => holder.id && api.write(holder.id, '\r'), 150);
+          code.value = '';
+          tm.term.focus();
+        };
+        $('#loginSend', card).onclick = submit;
+        code.onkeydown = (e) => {
+          if (e.key === 'Enter') submit();
+        };
+      }
+      let tail = '';
+      Object.assign(holder, tm, {
+        // 登入成功後如果停在「Press Enter to continue」，替使用者按一下；程式自己結束的話就不會用到
+        onData: (d) => {
+          tail = (tail + d.replace(ANSI_RE, '')).slice(-2000);
+          if (!enterTimer && /Login successful|Successfully logged in/i.test(tail)) enterTimer = setTimeout(() => holder.id && api.write(holder.id, '\r'), 1500);
+        },
+        onExit: (exitCode) => {
+          toast(exitCode === 0 ? t('login.done') : t('login.exit', { code: exitCode }), exitCode === 0 ? 'ok' : 'bad');
           finish();
         },
       });
       try {
-        t.fit.fit();
-        const r = await api.spawnPane({ kind, cwd: S.cwd || undefined, profileId: profile.id, cols: t.term.cols, rows: t.term.rows });
+        tm.fit.fit();
+        const r = await api.spawnPane({ kind: claude ? 'login' : 'codex-login', cwd: S.cwd || undefined, profileId: profile.id, cols: tm.term.cols, rows: tm.term.rows });
         holder.id = r.paneId;
         paneByPty.set(r.paneId, holder);
-        t.term.focus();
+        const buffered = pendingData.get(r.paneId);
+        if (buffered) {
+          pendingData.delete(r.paneId);
+          tm.term.write(buffered);
+          holder.onData(buffered);
+        }
+        tm.term.focus();
       } catch (e) {
         toast(t('login.failed', { msg: errMsg(e) }), 'bad');
       }
@@ -1125,39 +1441,38 @@ function loginModal(profile, kind = 'login') {
   );
 }
 
-async function addProfileFlow() {
+async function addProfileFlow(tool = 'claude') {
   const res = await modal(
-    `<h3>${esc(t('add.title'))}</h3>
+    `<h3>${esc(t('add.title', { tool: toolLabel(tool) }))}</h3>
      <div class="field"><label>${esc(t('add.name'))}</label><input id="pName" placeholder="${esc(t('add.namePlaceholder'))}" /></div>
-     <label class="field check"><input type="checkbox" id="pShare" checked /> ${esc(t('add.share'))}</label>
-     <label class="field check"><input type="checkbox" id="pCodex" /> ${esc(t('add.codex'))}</label>
+     <label class="field check"><input type="checkbox" id="pShare" checked /> ${esc(t(tool === 'codex' ? 'add.shareCodex' : 'add.share'))}</label>
+     <div class="hint">${esc(t(tool === 'codex' ? 'add.hintCodex' : 'add.hintClaude'))}</div>
      <div class="actions"><button id="mCancel">${esc(t('modal.cancel'))}</button><button id="mOk" class="primary">${esc(t('add.submit'))}</button></div>`,
     (card, close) => {
       $('#pName', card).focus();
       $('#mCancel', card).onclick = () => close(null);
-      $('#mOk', card).onclick = () =>
-        close({ name: $('#pName', card).value.trim() || t('add.defaultName'), shareHistory: $('#pShare', card).checked, separateCodex: $('#pCodex', card).checked });
+      $('#mOk', card).onclick = () => close({ name: $('#pName', card).value.trim() || t('add.defaultName'), shareHistory: $('#pShare', card).checked });
     },
   );
   if (!res) return;
-  const p = await api.addProfile(res.name, { shareHistory: res.shareHistory, separateCodex: res.separateCodex });
+  const p = await api.addProfile(tool, res.name, { shareHistory: res.shareHistory });
   await reloadProfiles();
-  loginModal({ ...p, account: {} });
+  loginModal(tool, { ...p, account: {} });
 }
 
-async function renameProfileFlow() {
-  const cur = profileOf(S.activeProfile);
+async function renameProfileFlow(tool) {
+  const cur = accountOf(tool, activeOf(tool));
   const n = await promptModal(t('rename.profile'), { value: profileName(cur) });
   if (n) {
-    await api.renameProfile(cur.id, n);
+    await api.renameProfile(tool, cur.id, n);
     reloadProfiles();
   }
 }
 
-async function removeProfileFlow() {
-  const cur = profileOf(S.activeProfile);
+async function removeProfileFlow(tool) {
+  const cur = accountOf(tool, activeOf(tool));
   const ok = await modal(
-    `<h3>${esc(t('remove.title', { name: profileName(cur) }))}</h3><div class="hint">${esc(t('remove.hint'))}</div>
+    `<h3>${esc(t('remove.title', { name: `${toolLabel(tool)} · ${profileName(cur)}` }))}</h3><div class="hint">${esc(t('remove.hint'))}</div>
      <div class="actions"><button id="mCancel">${esc(t('modal.cancel'))}</button><button id="mOk" class="primary">${esc(t('remove.submit'))}</button></div>`,
     (card, close) => {
       $('#mCancel', card).onclick = () => close(false);
@@ -1165,48 +1480,32 @@ async function removeProfileFlow() {
     },
   );
   if (!ok) return;
-  await api.removeProfile(cur.id);
+  await api.removeProfile(tool, cur.id);
   reloadProfiles();
 }
 
 async function installBridge() {
   toast(t('bridge.installing'));
-  const r = await api.installBridge(S.activeProfile);
+  const r = await api.installBridge(activeOf('codex'));
   toast(r.ok ? t('bridge.installed', { out: r.output }) : t('mcp.failed', { out: r.output }), r.ok ? 'ok' : 'bad', 9000);
 }
 
 async function installMcp() {
   toast(t('mcp.running'));
-  const r = await api.installCodexMcp(S.activeProfile);
+  const r = await api.installCodexMcp(activeOf('claude'));
   toast(r.ok ? t('mcp.ok', { out: r.output }) : t('mcp.failed', { out: r.output }), r.ok ? 'ok' : 'bad', 9000);
 }
 
 // ---------------------------------------------------------------- usage & context dashboard
-async function refreshUsage(force = false) {
+// check：更新完後檢查有沒有帳號用完（onLimitText 自己會判斷，不需要再檢查一次）
+async function refreshUsage(force = false, { check = true } = {}) {
   try {
     S.usage = await api.getUsage({ force });
   } catch {
     return;
   }
   renderDashboard();
-  const u = S.usage.claude[S.activeProfile];
-  if (u && u.ok && u.fiveHour && u.fiveHour.pct >= 100) {
-    const key = `${S.activeProfile}:${u.fiveHour.resetsAt}`;
-    if (!S.warnedLimit.has(key)) {
-      S.warnedLimit.add(key);
-      const alt = S.profiles.find((p) => {
-        const x = S.usage.claude[p.id];
-        return p.id !== S.activeProfile && x && x.ok && (!x.fiveHour || x.fiveHour.pct < 100);
-      });
-      toast(
-        t('limit.toast', { name: profileName(profileOf(S.activeProfile)), t: fmtReset(u.fiveHour.resetsAt) }) +
-          '\n' +
-          (alt ? t('limit.toastAlt', { alt: profileName(alt) }) : t('limit.toastCodex')),
-        'bad',
-        12000,
-      );
-    }
-  }
+  if (check) checkAccounts();
 }
 
 function codexWindows(rl) {
@@ -1234,9 +1533,9 @@ function usageRow(label, w) {
 function renderDashboard() {
   if ($('#dashboard').hidden) return;
   let html = '';
-  for (const p of S.profiles) {
+  for (const p of accountsOf('claude')) {
     const u = S.usage && S.usage.claude[p.id];
-    html += `<div class="dsec"><div class="head"><span class="name">Claude · ${esc(profileName(p))}</span>${p.id === S.activeProfile ? '<span class="sub">✓</span>' : ''}</div>
+    html += `<div class="dsec"><div class="head"><span class="name">Claude · ${esc(profileName(p))}</span>${p.id === activeOf('claude') ? '<span class="sub">✓</span>' : ''}</div>
       <div class="sub">${esc((p.account && p.account.email) || t('profile.notLoggedIn'))}${u && u.plan ? ` · ${esc(u.plan)}` : ''}</div>`;
     if (u && u.ok)
       html +=
@@ -1244,13 +1543,20 @@ function renderDashboard() {
     else if (!u || u.reason !== 'no-credentials') html += `<div class="sub">${esc(u ? t(`usage.reason.${u.reason}`) : t('usage.loading'))}</div>`;
     html += '</div>';
   }
-  const cw = codexWindows(S.usage && S.usage.codex);
-  html += `<div class="dsec"><div class="head"><span class="name">Codex · ${esc(t('usage.codexPlan'))}</span></div>`;
-  html += cw.length
-    ? cw.map((w) => usageRow(w.week ? t('usage.weekLong') : w.label === '5h' ? t('usage.5hLong') : w.label, w)).join('') +
-      `<div class="sub">${esc(t('usage.codexAt', { t: S.usage.codex.observedAt ? fmtAgo(S.usage.codex.observedAt) : '–' }))}</div>`
-    : `<div class="sub">${esc(t('usage.codexEmpty'))}</div>`;
-  html += `</div><button id="refreshUsage" class="ghost">${esc(t('usage.refresh'))}</button>`;
+  for (const p of accountsOf('codex')) {
+    const rl = S.usage && S.usage.codex && S.usage.codex[p.id];
+    const cw = codexWindows(rl);
+    const a = p.account || {};
+    const who = a.email || (a.apiKey ? 'API key' : t('profile.notLoggedIn'));
+    html += `<div class="dsec"><div class="head"><span class="name">Codex · ${esc(profileName(p))}</span>${p.id === activeOf('codex') ? '<span class="sub">✓</span>' : ''}</div>
+      <div class="sub">${esc(who)}${a.plan ? ` · ${esc(a.plan)}` : ''}</div>`;
+    html += cw.length
+      ? cw.map((w) => usageRow(w.week ? t('usage.weekLong') : w.label === '5h' ? t('usage.5hLong') : w.label, w)).join('') +
+        `<div class="sub">${esc(t('usage.codexAt', { t: rl.observedAt ? fmtAgo(rl.observedAt) : '–' }))}</div>`
+      : `<div class="sub">${esc(t('usage.codexEmpty'))}</div>`;
+    html += '</div>';
+  }
+  html += `<button id="refreshUsage" class="ghost">${esc(t('usage.refresh'))}</button>`;
   $('#dashUsage').innerHTML = html;
   $('#refreshUsage').onclick = () => refreshUsage(true);
 
@@ -1287,16 +1593,12 @@ function renderSettings() {
     <label>${esc(t('set.openAtLogin'))}<input type="checkbox" id="setLogin" ${st.openAtLogin ? 'checked' : ''}></label>
     <label>${esc(t('set.restore'))}<input type="checkbox" id="setRestore" ${st.autoRestore ? 'checked' : ''}></label>
     <label title="${esc(t('set.bridgeConfirmHint'))}">${esc(t('set.bridgeConfirm'))}<input type="checkbox" id="setBridgeConfirm" ${st.bridgeConfirm !== false ? 'checked' : ''}></label>
-    <label>${esc(t('set.fallback'))}<select id="setFallback">${opt('ask', t('set.fallback.ask'), st.fallback)}${opt('auto', t('set.fallback.auto'), st.fallback)}${opt(
-      'off',
-      t('set.fallback.off'),
+    <label title="${esc(t('set.fallbackHint'))}">${esc(t('set.fallback'))}<select id="setFallback">${opt('ask', t('set.fallback.ask'), st.fallback)}${opt(
+      'auto',
+      t('set.fallback.auto'),
       st.fallback,
-    )}</select></label>
-    <label>${esc(t('set.order'))}<select id="setOrder">${opt('other-profile,codex', t('set.order.profileFirst'), st.fallbackOrder)}${opt(
-      'codex,other-profile',
-      t('set.order.codexFirst'),
-      st.fallbackOrder,
-    )}</select></label>`;
+    )}${opt('off', t('set.fallback.off'), st.fallback)}</select></label>
+    <label title="${esc(t('set.limitContinueHint'))}">${esc(t('set.limitContinue'))}<input type="checkbox" id="setLimitContinue" ${st.limitContinue !== false ? 'checked' : ''}></label>`;
   $('#setTheme').onchange = async (e) => {
     await saveSettings({ theme: e.target.value, windowBg: THEMES[e.target.value].ui.bg });
     applyTheme();
@@ -1314,7 +1616,7 @@ function renderSettings() {
   $('#setRestore').onchange = (e) => saveSettings({ autoRestore: e.target.checked });
   $('#setBridgeConfirm').onchange = (e) => saveSettings({ bridgeConfirm: e.target.checked });
   $('#setFallback').onchange = (e) => saveSettings({ fallback: e.target.value });
-  $('#setOrder').onchange = (e) => saveSettings({ fallbackOrder: e.target.value.split(',') });
+  $('#setLimitContinue').onchange = (e) => saveSettings({ limitContinue: e.target.checked });
 }
 
 async function setLang(lang) {
@@ -1346,8 +1648,7 @@ async function boot() {
   Object.assign(S, {
     platform: init.platform,
     maxPanes: init.maxPanes,
-    profiles: init.profiles,
-    activeProfile: init.activeProfile,
+    accounts: init.accounts,
     settings: init.settings,
   });
   S.lang = init.settings.lang || detectLang();
@@ -1358,10 +1659,12 @@ async function boot() {
     e.stopPropagation();
     showProjectMenu(e.currentTarget);
   };
-  $('#accountBtn').onclick = (e) => {
-    e.stopPropagation();
-    showAccountMenu(e.currentTarget);
-  };
+  for (const tool of TOOLS) {
+    $(`#${tool}AccountBtn`).onclick = (e) => {
+      e.stopPropagation();
+      showAccountMenu(tool, e.currentTarget);
+    };
+  }
   $('#dashBtn').onclick = () => {
     $('#dashboard').hidden = !$('#dashboard').hidden;
     renderDashboard();

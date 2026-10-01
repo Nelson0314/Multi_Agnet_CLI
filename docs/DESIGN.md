@@ -2,9 +2,9 @@
 
 ## 出發點
 
-原本的用法是在 Claude session 裡用插件叫 Codex。這樣有兩個問題：Codex 做了什麼只看得到最後一段輸出，想接手也接不了；Claude 的 5 小時或每週額度用完時，工作停在半路，要自己整理脈絡再貼給 Codex。
+原本的用法是在 Claude session 裡用插件叫 Codex。這樣 Codex 做了什麼只看得到最後一段輸出，想接手也接不了。另外，Claude 的 5 小時或每週額度用完時，要在每個開著的視窗各打一次 `/login` 換帳號才能繼續。
 
-這個程式讓 Claude 負責主要工作，Codex 在兩個情況派上用場：平常當 Claude 的子 agent，Claude 沒額度時暫時接手。
+這個程式讓 Claude 負責主要工作，Codex 當 Claude 的子 agent；額度用完時換同一個工具的另一個帳號續跑，不交給另一個工具。
 
 ## Codex 當子 agent
 
@@ -56,34 +56,51 @@ Claude 讀 `CLAUDE.md`，Codex 讀 `AGENTS.md`。把共同規則寫在 `AGENTS.m
 
 ## 額度用完時
 
+### 為什麼平常要在每個視窗打 /login
+
+- Claude Code 在啟動時讀登入資訊，之後放在記憶體裡用；執行中的程式換不了帳號。
+- 同一個設定資料夾（`~/.claude`）只有一份登入資訊。在一個視窗 `/login` 會覆蓋它，但其他視窗手上還是舊的 token，要重新啟動或自己重新登入才會換。
+- 所以「一台電腦不能同時開兩個帳號」只在共用同一個設定資料夾時成立。每個帳號一個 `CLAUDE_CONFIG_DIR`（macOS 的 Keychain 項目名稱也會帶上資料夾的 hash），不同帳號就可以同時跑。Codex 同理，每個帳號一個 `CODEX_HOME`。
+
 ### 偵測
 
-任一條件成立就觸發：
+兩種來源，都要有額度數字佐證才自動處理：
 
-1. 窗格輸出出現 `usage limit reached`、`5-hour limit reached`、`You've hit your limit` 之類的文字（`LIMIT_PATTERNS`）。
-2. 儀表板每 2 分鐘讀一次額度，目前帳號的 5 小時額度到 100%。
+1. 窗格輸出出現額度用完的文字（`LIMIT_PATTERNS`），例如 Claude Code 目前的 `You've hit your session limit · resets 3pm`、`You've hit your weekly limit`，舊版的 `usage limit reached`，Codex 的 `You've hit your usage limit`。fast mode 的「fast limit」不算。
+2. 每 2 分鐘的額度檢查：Claude 用 OAuth usage 端點，加上窗格 statusline 回報的 `rate_limits`；Codex 用 session 紀錄裡的 `rate_limits`。5 小時或每週視窗到 99% 以上就算用完。
 
-觸發後依設定詢問、自動執行或不處理。
+只有文字、額度數字顯示還有額度時，當成誤判（例如畫面上剛好在看這段程式碼），重新開始偵測。讀不到額度時不自動換，改成詢問。剛開啟 20 秒內的窗格會重播舊對話，裡面可能有舊的額度訊息，這段時間只認額度數字。
 
-### 順序
+### 換帳號接力
 
 ```
-Claude 帳號 A 用完
+帳號 A 用完（有窗格在用）
    │
-   ├─ 還有別的 Claude 帳號有額度 ─▶ 同一格用帳號 B 執行 claude --resume <同一個 session>
+   ├─ 選剩餘額度最多、已登入、沒用完的帳號 B
    │
-   └─ 沒有 ─▶ 寫交接文件 ─▶ 同一格啟動 Codex，要它先讀文件
-                                │
-                                └─ Claude 額度恢復 ─▶ 從 Codex 交回 Claude，流程相同
+   ├─ 被額度打斷的窗格、閒置的窗格 ─▶ 結束程式（等它真的結束）─▶ 用 B `--resume` 同一個 session
+   │                                    被打斷的窗格另外附一句「繼續」
+   │
+   ├─ 還在工作的窗格 ─▶ 等它停下來（3 秒沒有輸出，或也撞到額度）再換；等待期間 B 也用完就改選別的
+   │
+   └─ 之後新開的 session 改用 B
 ```
 
-換帳號續跑不會損失任何內容。每個帳號是一個 `CLAUDE_CONFIG_DIR`，它的 `projects/` 用 symlink 指回 `~/.claude/projects`，所以任何帳號都讀得到同一份對話紀錄。
+- 範圍是所有專案裡用帳號 A 的窗格，不只畫面上這一個。
+- 「詢問我」時，上方出現一列提示，一個按鈕換掉全部；「自動換帳號」時直接執行。
+- 沒有其他還有額度的帳號時，只提示 A 什麼時候重置，不會在兩個用完的帳號之間來回換。
+- 先等舊程式結束才用新帳號續跑：同一個 session 由兩個程序同時寫，紀錄會分岔。
+- 在帳號選單手動切換帳號時，也可以選擇把開著的窗格一起換過去，流程相同。
 
-Claude Code 在啟動時決定用哪個帳號，執行中的程式換不了帳號。換帳號的做法是結束窗格裡的程式，帶新的 `CLAUDE_CONFIG_DIR` 重新 `--resume`。窗格的位置和名稱不變，只有帳號標籤會換。
+換帳號續跑不會損失對話內容：同一個工具的帳號共用 session 歷史（Claude 的 `projects/`、Codex 的 `sessions/` 以 symlink 指回預設資料夾）。
+
+### 共用資料夾涵蓋不到的設定
+
+Claude 的 `.claude.json` 存著登入身分，不能整個共用；但資料夾信任、user / local scope 的 MCP server、已允許的工具、首次使用設定也在裡面。新帳號少了這些，續跑時會先跳出主題設定或「信任這個資料夾嗎？」，自動送出的「繼續」就卡住了，也會少了 MCP 工具。所以開 Claude 窗格前，程式把預設帳號的這幾項補進目標帳號，只補缺的，不覆蓋目標帳號自己的設定。
 
 ### 交接文件而不是轉換對話紀錄
 
-跨模型交接時，程式不把 Claude 的對話紀錄轉成 Codex 的格式。兩邊的工具呼叫與系統提示格式不同，轉過去 Codex 也讀不懂；兩個 agent 真正共用的狀態是工作目錄和 git。
+窗格的 `⇄` 可以手動把工作交給另一個工具。程式不把 Claude 的對話紀錄轉成 Codex 的格式：兩邊的工具呼叫與系統提示格式不同，轉過去也讀不懂；兩個 agent 真正共用的狀態是工作目錄和 git。
 
 所以交接文件（`.multi-agent/handoffs/<時間>-claude-to-codex.md`）只放接手需要的內容：
 
@@ -93,18 +110,19 @@ Claude Code 在啟動時決定用哪個帳號，執行中的程式換不了帳�
 - 目前分支、`git status`、`git diff --stat`
 - 最近 12 則對話，只有文字，不含工具輸出
 
-接手的 prompt 要對方先讀文件，用 git 確認程式碼現況，簡短回報進度和下一步，然後繼續。文件會依介面語言寫成中文或英文。這個資料夾會加進 `.git/info/exclude`，不會出現在 `git status`。
+接手的 prompt 要對方先讀文件，用 git 確認程式碼現況，簡短回報進度和下一步，然後繼續。文件會依介面語言寫成中文或英文。這個資料夾會加進 `.git/info/exclude`，不會出現在 `git status`。換到不共用歷史的帳號時，也用交接文件開新 session。
 
 ## 帳號
 
-- 一個 profile 是 `{ 名稱, CLAUDE_CONFIG_DIR, CODEX_HOME（可選） }`。預設帳號就是原本的 `~/.claude`。
-- 登入用官方的 `claude auth login` 與 `codex login`，在小終端機裡執行，程式不經手密碼。
+- Claude 帳號是 `{ 名稱, CLAUDE_CONFIG_DIR }`，Codex 帳號是 `{ 名稱, CODEX_HOME }`，兩份清單、兩個目前帳號，互不影響。預設帳號就是原本的 `~/.claude` 與 `~/.codex`。
+- 窗格記得自己用哪個帳號（Claude 窗格是 Claude 帳號，Codex 窗格是 Codex 帳號），還原時沿用。Claude 窗格與 shell 另外帶上目前的 Codex 帳號，讓 Claude 叫出來的 Codex、shell 裡打的 `codex` 用同一個帳號。
+- 舊版的 Codex 登入掛在 Claude 帳號底下（`profile.codexHome`），升級時搬成同 id 的 Codex 帳號，舊的 Codex 窗格紀錄照樣對得上。
+- 登入用官方的 `claude auth login` 與 `codex login`，在小終端機裡執行，程式不經手密碼。瀏覽器沒有自動完成時，授權碼可以貼在小終端機下方的欄位。
 - 讀額度時只讀取各帳號現有的 OAuth token，不寫入、不刷新。刷新交給 Claude Code 自己。
-- 每個窗格記得自己用哪個帳號，還原時沿用。
 
 ## 之後可以做的
 
 - context 超過 80% 時，在窗格上建議 `/compact`，或開新 session 並附上交接文件。
 - 用 Claude Code 的 `Notification` 與 `Stop` hook 回報哪個 session 在等輸入，在窗格標題上提示。
 - Claude 呼叫 Codex 時，自動在空窗格打開那個 Codex session。
-- 新開 session 時自動選額度最多的帳號。
+- 額度恢復後，把窗格換回原本的帳號。

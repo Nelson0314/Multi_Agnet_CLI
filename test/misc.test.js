@@ -13,6 +13,15 @@ test('額度用完訊息偵測', () => {
   assert.ok(hit("You've hit your usage limit. Upgrade to Pro"));
   assert.ok(hit('You have hit your usage limit'));
   assert.ok(hit('5-hour limit reached ∙ resets 3pm'));
+  // Claude Code 目前的寫法：session = 5 小時額度，另有 weekly、Opus 等
+  assert.ok(hit("You've hit your session limit · resets 3pm (Asia/Taipei)"));
+  assert.ok(hit('You’ve hit your weekly limit · resets Mon 9am'));
+  assert.ok(hit("You've hit your Opus limit · resets Oct 3"));
+  assert.ok(hit("You've hit your limit · resets 3am"));
+  assert.ok(hit('Usage limit reached · continuing automatically at 3pm · esc to cancel'));
+  // fast mode 的限制只是改回一般速度，不算額度用完
+  assert.ok(!hit("You've hit your fast limit"));
+  assert.ok(!hit('Fast limit reached and temporarily disabled · resets in 5m'));
   assert.ok(!hit('I will limit the number of retries'));
 });
 
@@ -35,6 +44,8 @@ test('Store 保留預設值並持久化', () => {
   const dir = tmpdir();
   const s = new Store(dir);
   assert.strictEqual(s.data.profiles[0].id, 'default');
+  assert.strictEqual(s.data.codexProfiles[0].id, 'default');
+  assert.strictEqual(s.data.activeCodexProfile, 'default');
   s.touchProject('/p');
   s.project('/p').panes.push({ kind: 'claude', sessionId: 'x' });
   s.save();

@@ -1,7 +1,7 @@
 {
   "name": "multi-agent-cli",
   "version": "0.1.0",
-  "description": "One window for all Claude Code and Codex sessions in a project: up to 6 terminals side by side, usage and context dashboard, account switching, Codex fallback.",
+  "description": "One window for all Claude Code and Codex sessions in a project: up to 6 terminals side by side, usage and context dashboard, separate Claude and Codex accounts, one-step account switching when usage runs out.",
   "main": "src/main/main.js",
   "private": true,
   "scripts": {
