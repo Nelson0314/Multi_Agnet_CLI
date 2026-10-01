@@ -21,6 +21,7 @@ const DEFAULTS = {
     openAtLogin: false, // 登入電腦時自動開啟本程式
     fallback: 'ask', // 'off' | 'ask' | 'auto'：帳號額度用完時，把用這個帳號的窗格換到另一個帳號
     limitContinue: true, // 換帳號後，對因額度中斷的窗格送出「繼續」
+    shareInstructions: true, // Codex 窗格帶上 Claude 的指示、skills、MCP；Claude 窗格帶上 AGENTS.md
     usageRefreshSec: 120,
     theme: 'terminal', // 見 src/renderer/themes.js
     lang: null, // null：依系統語言

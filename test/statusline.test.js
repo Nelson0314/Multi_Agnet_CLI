@@ -7,7 +7,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { tmpdir } = require('./helpers');
 const { Bridge } = require('../src/main/bridge');
-const { writeCodexBridgeConfig } = require('../src/main/codexConfig');
+const { removeCodexBridgeConfig } = require('../src/main/codexConfig');
 const { Store } = require('../src/main/store');
 const cs = require('../src/main/claudeSessions');
 
@@ -50,20 +50,17 @@ test('statusline 在窗格外執行時什麼都不做', async () => {
   assert.strictEqual(out, '');
 });
 
-test('Codex 設定：寫入 env_vars、更新舊區塊、不動其他設定', () => {
+test('移除舊版寫進 Codex config.toml 的窗格互通區塊，其他設定不動', () => {
   const home = tmpdir();
   const cfg = path.join(home, 'config.toml');
-  fs.writeFileSync(cfg, 'model = "gpt-5"\n\n[mcp_servers.multi-agent]\ncommand = "node"\nargs = ["/old/mcp.js"]\n\n[mcp_servers.other]\ncommand = "x"\n');
-  writeCodexBridgeConfig(home, '/new/mcp.js');
+  fs.writeFileSync(cfg, 'model = "gpt-5"\n\n[mcp_servers.multi-agent]\ncommand = "node"\nargs = ["/old/mcp.js"]\nenv_vars = ["MULTI_AGENT_BRIDGE"]\n\n[mcp_servers.other]\ncommand = "x"\n');
+  assert.strictEqual(removeCodexBridgeConfig(home), true);
   const s = fs.readFileSync(cfg, 'utf8');
+  assert.doesNotMatch(s, /multi-agent|old/);
   assert.match(s, /^model = "gpt-5"/);
-  assert.match(s, /args = \["\/new\/mcp\.js"\]\nenv_vars = \["MULTI_AGENT_BRIDGE", "MULTI_AGENT_TOKEN", "MULTI_AGENT_PANE_ID"\]/);
-  assert.doesNotMatch(s, /old/);
   assert.match(s, /\[mcp_servers\.other\]\ncommand = "x"/);
-  assert.strictEqual((s.match(/\[mcp_servers\.multi-agent\]/g) || []).length, 1);
-  const empty = tmpdir();
-  assert.strictEqual(writeCodexBridgeConfig(empty, '/a.js', { onlyIfPresent: true }), false);
-  assert.ok(!fs.existsSync(path.join(empty, 'config.toml')));
+  assert.strictEqual(removeCodexBridgeConfig(home), false);
+  assert.strictEqual(removeCodexBridgeConfig(tmpdir()), false);
 });
 
 test('設定遷移：舊檔的 bridgeConfirm=true 改成預設不用確認，只做一次', () => {

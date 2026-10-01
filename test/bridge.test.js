@@ -161,3 +161,31 @@ test('endpointFile 對應 Electron 的 userData 位置', () => {
   assert.match(endpointFile({}, 'darwin'), /Library\/Application Support\/multi-agent-cli\/bridge\/endpoint\.json$/);
   assert.match(endpointFile({ XDG_CONFIG_HOME: '/x' }, 'linux'), /^\/x\/multi-agent-cli\/bridge\/endpoint\.json$/);
 });
+
+test('recentMessages：最近幾則對話，合併同一則回覆的多段文字，略過工具輸出', () => {
+  const { recentMessages } = require('../src/main/bridge');
+  const claudeEntries = [
+    { type: 'user', message: { content: 'first task' } },
+    { type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'part one' }] } },
+    { type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: 'ignored output' }] } },
+    { type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'part two' }] } },
+    { type: 'user', message: { content: 'second task' } },
+    { type: 'assistant', message: { id: 'm2', content: [{ type: 'text', text: 'done' }] } },
+  ];
+  assert.deepStrictEqual(
+    recentMessages(claudeEntries, 'claude', 10).map((t) => [t.role, t.text]),
+    [
+      ['user', 'first task'],
+      ['agent', 'part one\n\npart two'],
+      ['user', 'second task'],
+      ['agent', 'done'],
+    ],
+  );
+  assert.strictEqual(recentMessages(claudeEntries, 'claude', 2)[0].text, 'second task');
+  const codexEntries = [
+    { type: 'event_msg', payload: { type: 'user_message', message: 'review it' } },
+    { type: 'event_msg', payload: { type: 'agent_message', message: 'looks fine' } },
+  ];
+  assert.deepStrictEqual(recentMessages(codexEntries, 'codex', 5).map((t) => t.role), ['user', 'agent']);
+});

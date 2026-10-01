@@ -11,11 +11,11 @@ const claudeSessions = require('./claudeSessions');
 const codexSessions = require('./codexSessions');
 const usage = require('./usage');
 const profiles = require('./profiles');
-const { createHandoff } = require('./handoff');
 const { setAutostart } = require('./autostart');
 const { Bridge } = require('./bridge');
 const titles = require('./titles');
-const { writeCodexBridgeConfig } = require('./codexConfig');
+const { removeCodexBridgeConfig, ENV_VARS } = require('./codexConfig');
+const team = require('./teamContext');
 
 const MAX_PANES = 6;
 const ICON = path.join(__dirname, '..', '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
@@ -152,7 +152,7 @@ function codexNoDaemon() {
   return noDaemonCheck;
 }
 
-// ---------------------------------------------------------------- Claude 窗格的自動設定
+// ---------------------------------------------------------------- 窗格的自動設定
 // 每個 Claude 窗格啟動時自動帶上：
 //   --mcp-config：multi-agent 工具（跟其他窗格對話），連線資訊直接寫在設定裡，不依賴環境變數傳遞
 //   --append-system-prompt-file：告訴 Claude 它在多窗格環境裡、要用這些工具跟其他窗格溝通
@@ -161,15 +161,16 @@ const BRIDGE_DIR = () => path.join(app.getPath('userData'), 'bridge');
 const MCP_SCRIPT = path.join(__dirname, '..', 'bridge', 'mcp.js');
 const STATUS_SCRIPT = path.join(__dirname, '..', 'bridge', 'statusline.js');
 
-const SYSTEM_HINT = `You are running inside Multi-Agent CLI, a desktop app that shows several terminal panes side by side for the same project: Claude Code sessions, Codex CLI sessions and plain shells. The user can see all of them.
+// 兩種 agent 共用的團隊說明；other 是「另一種 agent」的名稱
+const teamHint = (other) => `You are running inside Multi-Agent CLI, a desktop app that shows several terminal panes side by side for the same project: Claude Code sessions, Codex CLI sessions and plain shells. You are one member of this team and the user can see every pane.
 
 The multi-agent MCP tools let you work with the other panes:
 - list_panes: see the open panes, their numbers, kinds and titles.
-- send_to_pane: send a message or a task to another pane, for example ask the Codex pane to review a change.
+- read_pane: read another pane's latest reply, or the last lines of a shell pane. Pass messages (for example 10) to read the recent conversation of that pane and catch up on what it is doing.
+- send_to_pane: send a message or a task to another pane, for example ask the ${other} pane to review a change.
 - wait_for_reply: wait until that Claude or Codex pane finishes and get its answer.
-- read_pane: read another pane's latest reply, or the last lines of a shell pane.
 
-When the user refers to another pane, to "Codex", or asks you to coordinate with another agent, use these tools. Do not start a separate codex process with Bash or use a different Codex MCP server for this, because that would not be the session the user is looking at. When you send a task, include the goal, the relevant files and how to verify the result.
+When the user refers to another pane, to "${other}", or asks you to coordinate with another agent, use these tools. Do not start a separate ${other.toLowerCase()} process from the shell or through a different MCP server for this, because that would not be the session the user is looking at. Before taking over or continuing work another pane started, catch up with list_panes and read_pane (with messages). When you send a task, include the goal, the relevant files and how to verify the result.
 `;
 
 function userStatusline(profile) {
@@ -183,7 +184,10 @@ function userStatusline(profile) {
   }
 }
 
-function claudePaneArgs(paneId) {
+const shareInstructions = () => store.data.settings.shareInstructions !== false;
+
+// Claude 窗格：multi-agent 工具、團隊說明，加上寫給 Codex 的指示（AGENTS.md）
+function claudePaneArgs(paneId, { cwd, codexProfile, claudeProfile }) {
   const dir = BRIDGE_DIR();
   fs.mkdirSync(dir, { recursive: true });
   const mcp = path.join(dir, `${paneId}.mcp.json`);
@@ -191,18 +195,75 @@ function claudePaneArgs(paneId) {
     mcp,
     JSON.stringify({ mcpServers: { 'multi-agent': { type: 'stdio', command: 'node', args: [MCP_SCRIPT], env: bridge ? bridge.envFor(paneId) : {} } } }),
   );
-  const hint = path.join(dir, 'system-hint.md');
-  fs.writeFileSync(hint, SYSTEM_HINT);
+  let ctx = { text: '', sources: [] };
+  if (shareInstructions() && cwd) {
+    try {
+      ctx = team.codexContextForClaude({ claudeDir: profiles.claudeDirOf(claudeProfile), codexHome: codexHomeOf(codexProfile), cwd });
+    } catch (e) {
+      console.warn('team context:', e.message);
+    }
+  }
+  const hint = path.join(dir, `${paneId}.hint.md`);
+  fs.writeFileSync(hint, [teamHint('Codex'), ctx.text].filter(Boolean).join('\n'));
   const settings = path.join(dir, 'claude-settings.json');
   fs.writeFileSync(settings, JSON.stringify({ statusLine: { type: 'command', command: `node ${JSON.stringify(STATUS_SCRIPT)}`, padding: 0 } }));
   // --mcp-config 可接多個值，放在最前面、後面緊接其他旗標，才不會吃掉後面的參數
-  return ['--mcp-config', mcp, '--append-system-prompt-file', hint, '--settings', settings];
+  return { args: ['--mcp-config', mcp, '--append-system-prompt-file', hint, '--settings', settings], shared: { sources: ctx.sources, skills: [], mcp: [] } };
+}
+
+// Codex 窗格：用 -c 帶上 multi-agent 工具、團隊說明、寫給 Claude 的指示與 skills、Claude 的 MCP server。
+// 不改 config.toml；使用者自己的 developer_instructions 會保留在最前面。
+function codexPaneArgs({ cwd, codexProfile, claudeProfile }) {
+  const home = codexHomeOf(codexProfile);
+  const args = ['-c', `mcp_servers.multi-agent=${team.tomlValue({ command: 'node', args: [MCP_SCRIPT], env_vars: ENV_VARS })}`];
+  const shared = { sources: [], skills: [], mcp: [] };
+  let ctx = { text: '' };
+  if (shareInstructions() && cwd) {
+    try {
+      const claudeDir = profiles.claudeDirOf(claudeProfile);
+      ctx = team.claudeContextForCodex({ claudeDir, codexHome: home, cwd });
+      Object.assign(shared, { sources: ctx.sources, skills: ctx.skills });
+      const mine = team.codexMcpNames(home);
+      const servers = team.claudeMcpServers({ claudeJsonFile: profiles.claudeJsonOf(claudeProfile), claudeDir, cwd });
+      for (const [name, t] of Object.entries(servers)) {
+        if (name === 'multi-agent' || mine.has(name)) continue;
+        args.push('-c', `mcp_servers.${name}=${team.tomlValue(t)}`);
+        shared.mcp.push(name);
+      }
+    } catch (e) {
+      console.warn('team context:', e.message);
+    }
+  }
+  let own = null;
+  try {
+    own = team.topLevelString(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'), 'developer_instructions');
+  } catch {}
+  const full = [own, teamHint('Claude'), ctx.text].filter(Boolean).join('\n\n');
+  // macOS / Linux 直接放進參數；Windows 經過 cmd.exe，參數長度有限又不能有換行，所以寫成檔案，要 Codex 先讀
+  if (process.platform !== 'win32' && Buffer.byteLength(full) < 100 * 1024) {
+    args.push('-c', `developer_instructions=${team.tomlStr(full)}`);
+  } else {
+    const dir = path.join(BRIDGE_DIR(), 'context');
+    fs.mkdirSync(dir, { recursive: true });
+    // 每個專案一個固定檔名：續跑的 session 還記得這個路徑。這句話不要有單引號，才會用 cmd.exe 安全的單引號字串
+    const file = path.join(dir, `${crypto.createHash('sha256').update(cwd || '').digest('hex').slice(0, 12)}-codex.md`);
+    fs.writeFileSync(file, full);
+    args.push(
+      '-c',
+      `developer_instructions=${team.tomlStr(
+        `You are one member of a team of agents (Claude Code, Codex and shells) in Multi-Agent CLI, and the multi-agent MCP tools let you talk to the other panes. Before your first reply, read the file ${file} and follow it: it explains how to work with the other panes and contains the standing instructions the user wrote for Claude Code and the skills you can use.`,
+      )}`,
+    );
+  }
+  return { args, shared };
 }
 
 function cleanupPaneFiles(paneId) {
-  try {
-    fs.rmSync(path.join(BRIDGE_DIR(), `${paneId}.mcp.json`), { force: true });
-  } catch {}
+  for (const f of [`${paneId}.mcp.json`, `${paneId}.hint.md`]) {
+    try {
+      fs.rmSync(path.join(BRIDGE_DIR(), f), { force: true });
+    } catch {}
+  }
 }
 
 // Codex 額度（每個 Codex 帳號）。共用 session 歷史時，sessions/ 裡的檔案分不出是哪個帳號寫的，
@@ -355,11 +416,23 @@ function registerIpc() {
     const { cmd, sessionId, raw } = spec;
     const paneId = crypto.randomUUID();
     let args = spec.args;
-    if (opts.kind === 'claude') args = [...claudePaneArgs(paneId), ...args];
-    // 新版 Codex 預設把對話交給共用的背景服務跑，MCP 工具也由它啟動，
-    // 拿到的是該服務啟動時的環境變數，連不回這個窗格。窗格自己跑就沒這個問題。
-    if (opts.kind === 'codex' && (await codexNoDaemon())) args = ['--no-daemon', ...args];
     const cwd = opts.cwd;
+    // 子資料夾或 worktree 裡的 session 在它原本的資料夾續跑，claude --resume 才找得到
+    const runCwd = opts.runCwd && fs.existsSync(opts.runCwd) ? opts.runCwd : cwd;
+    let shared = null;
+    if (opts.kind === 'claude') {
+      const r = claudePaneArgs(paneId, { cwd: runCwd, claudeProfile: profile, codexProfile: accountOf('codex', codexProfileId) });
+      args = [...r.args, ...args];
+      shared = r.shared;
+    }
+    if (opts.kind === 'codex') {
+      const r = codexPaneArgs({ cwd: runCwd, codexProfile: profile, claudeProfile: accountOf('claude') });
+      args = [...r.args, ...args];
+      shared = r.shared;
+      // 新版 Codex 預設把對話交給共用的背景服務跑，MCP 工具也由它啟動，
+      // 拿到的是該服務啟動時的環境變數，連不回這個窗格。窗格自己跑就沒這個問題。
+      if (await codexNoDaemon()) args = ['--no-daemon', ...args];
+    }
     panes.set(paneId, { kind: opts.kind, cwd, sessionId, profileId: profile.id });
     if (opts.name && sessionId) {
       store.project(cwd).names[sessionId] = opts.name;
@@ -367,8 +440,6 @@ function registerIpc() {
       queueTitle(opts.kind, cwd, sessionId, opts.name, profile.id);
     }
     const since = Date.now();
-    // 子資料夾或 worktree 裡的 session 在它原本的資料夾續跑，claude --resume 才找得到
-    const runCwd = opts.runCwd && fs.existsSync(opts.runCwd) ? opts.runCwd : cwd;
     // 換到另一個 Claude 帳號時，先補上預設帳號的資料夾信任、MCP server 與首次設定，續跑才不會卡在對話框
     if ((opts.kind === 'claude' || opts.kind === 'shell') && cwd) {
       try {
@@ -382,7 +453,7 @@ function registerIpc() {
     if (userSl) env.MULTI_AGENT_USER_STATUSLINE = userSl;
     ptys.spawn(paneId, { cmd, args, cwd: runCwd, env, cols: opts.cols, rows: opts.rows, raw });
     if (opts.kind === 'codex' && !sessionId) discoverCodexSession(paneId, cwd, codexHomeOf(profile), since);
-    return { paneId, sessionId, profileId: profile.id, codexProfileId };
+    return { paneId, sessionId, profileId: profile.id, codexProfileId, shared };
   });
 
   ipcMain.on('bridge:answer', (_e, id, value) => {
@@ -390,25 +461,6 @@ function registerIpc() {
     if (done) {
       rendererAsks.delete(id);
       done(value);
-    }
-  });
-
-  // 把窗格互通的 MCP server 裝到 Claude（claude mcp add）與 Codex（~/.codex/config.toml）
-  // Claude 窗格會自動帶上 multi-agent 工具（見 claudePaneArgs），這裡只需要設定 Codex：
-  // Codex 會過濾傳給 MCP server 的環境變數，所以要用 env_vars 明列要轉交的連線資訊
-  ipcMain.handle('bridge:install', async (_e, codexProfileId) => {
-    const p = accountOf('codex', codexProfileId);
-    const out = [];
-    // 舊版裝在 Claude user scope 的同名 server 移除，避免和窗格自動帶上的重複
-    const rm = await runInShell('claude', ['mcp', 'remove', '--scope', 'user', 'multi-agent'], profiles.claudeEnv(accountOf('claude')));
-    out.push(`claude: ${rm.ok ? 'removed old user-scope entry; panes get the tools automatically' : 'panes get the tools automatically'}`);
-    try {
-      writeCodexBridgeConfig(codexHomeOf(p), MCP_SCRIPT);
-      out.push('codex: ok');
-      return { ok: true, output: out.join('\n') };
-    } catch (e) {
-      out.push(`codex: ${e.message}`);
-      return { ok: false, output: out.join('\n') };
     }
   });
 
@@ -490,11 +542,6 @@ function registerIpc() {
     if (tool === 'codex') {
       const p = profiles.createCodexProfile(base, name, opts);
       store.data.codexProfiles.push(p);
-      // 預設 Codex 帳號裝過窗格互通的話，新帳號也裝上（共用 config.toml 時本來就有，這裡不會重複）
-      try {
-        const cfg = fs.readFileSync(path.join(codexHomeOf(store.codexProfile(profiles.DEFAULT_ID)), 'config.toml'), 'utf8');
-        if (cfg.includes('[mcp_servers.multi-agent]')) writeCodexBridgeConfig(p.codexHome, MCP_SCRIPT);
-      } catch {}
       store.save();
       return p;
     }
@@ -535,16 +582,6 @@ function registerIpc() {
     return runInShell('claude', ['mcp', 'add', '--scope', 'user', 'codex', '--', 'codex', 'mcp-server'], profiles.claudeEnv(p));
   });
 
-  ipcMain.handle('handoff:create', (_e, opts) => {
-    const src = panes.get(opts.paneId) || {};
-    const profile = accountOf(toolOf(opts.fromKind), opts.profileId || src.profileId);
-    return createHandoff({
-      ...opts,
-      claudeProjectsRoot: opts.fromKind === 'claude' ? claudeRoot(profile) : undefined,
-      codexHome: opts.fromKind === 'codex' ? codexHomeOf(profile) : undefined,
-    });
-  });
-
   ipcMain.handle('settings:set', (_e, patch) => {
     Object.assign(store.data.settings, patch);
     if ('openAtLogin' in patch) applyAutostart();
@@ -570,12 +607,12 @@ app.whenReady().then(() => {
   claudeSessions.setKnownWindows(store.data.contextWindows || (store.data.contextWindows = {}));
   // 上次關閉時留下的窗格設定檔（token 已失效）清掉
   try {
-    for (const f of fs.readdirSync(BRIDGE_DIR())) if (f.endsWith('.mcp.json')) fs.rmSync(path.join(BRIDGE_DIR(), f), { force: true });
+    for (const f of fs.readdirSync(BRIDGE_DIR())) if (f.endsWith('.mcp.json') || f.endsWith('.hint.md') || f === 'system-hint.md') fs.rmSync(path.join(BRIDGE_DIR(), f), { force: true });
   } catch {}
-  // 舊版裝過的 Codex 設定缺 env_vars，啟動時補上
+  // 舊版寫進 Codex config.toml 的窗格互通區塊：現在由窗格自動帶上，移除舊的
   for (const p of store.data.codexProfiles) {
     try {
-      writeCodexBridgeConfig(codexHomeOf(p), MCP_SCRIPT, { onlyIfPresent: true });
+      removeCodexBridgeConfig(codexHomeOf(p));
     } catch {}
   }
   if (store.data.settings.openAtLogin) applyAutostart();

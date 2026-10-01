@@ -58,11 +58,13 @@ const TOOLS = [
   },
   {
     name: 'read_pane',
-    description: "Read another pane's latest reply (for Claude/Codex panes) or the last lines of its screen (for shells).",
+    description:
+      "Read another pane's latest reply (for Claude/Codex panes) or the last lines of its screen (for shells). Set messages to read that pane's recent conversation instead, to catch up on what it has been doing.",
     inputSchema: {
       type: 'object',
       properties: {
         pane: { type: ['integer', 'string'] },
+        messages: { type: 'integer', description: 'Return the last N messages of the conversation (user and agent text, max 40) instead of only the latest reply' },
         lines: { type: 'integer', description: 'Screen lines for shell panes (default 60)' },
       },
       required: ['pane'],

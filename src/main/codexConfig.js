@@ -1,6 +1,7 @@
 'use strict';
-// 在 Codex 的 config.toml 寫入 [mcp_servers.multi-agent]。
-// Codex 會過濾傳給 MCP server 的環境變數，所以用 env_vars 明列窗格的連線資訊。
+// 舊版用「讓 Codex 窗格也能跟其他窗格對話」把 [mcp_servers.multi-agent] 寫進 Codex 的 config.toml。
+// 現在每個 Codex 窗格啟動時用 -c 自動帶上，不再需要那個區塊；在窗格外執行的 codex 讀到它反而會連不上而報錯，
+// 所以啟動時把它移除。其他設定原封不動。
 const fs = require('fs');
 const path = require('path');
 
@@ -8,22 +9,18 @@ const ENV_VARS = ['MULTI_AGENT_BRIDGE', 'MULTI_AGENT_TOKEN', 'MULTI_AGENT_PANE_I
 // 區塊到下一個以 [ 開頭的行（下一個 table）為止；args = [...] 這種行內陣列不會被當成結尾
 const BLOCK_RE = /^\[mcp_servers\.multi-agent\][^\n]*\n(?:(?!\[)[^\n]*(?:\n|$))*/m;
 
-function block(script) {
-  return `[mcp_servers.multi-agent]\ncommand = "node"\nargs = [${JSON.stringify(script)}]\nenv_vars = [${ENV_VARS.map((v) => JSON.stringify(v)).join(', ')}]\n`;
-}
-
-/** 寫入或更新區塊，其他設定原封不動。onlyIfPresent：只更新已存在的區塊（啟動時修正舊版設定用） */
-function writeCodexBridgeConfig(home, script, { onlyIfPresent = false } = {}) {
+/** @returns {boolean} 是否有移除 */
+function removeCodexBridgeConfig(home) {
   const cfg = path.join(home, 'config.toml');
-  const cur = fs.existsSync(cfg) ? fs.readFileSync(cfg, 'utf8') : '';
-  const has = BLOCK_RE.test(cur);
-  if (onlyIfPresent && !has) return false;
-  const next = has ? cur.replace(BLOCK_RE, block(script) + '\n') : `${cur}${cur && !cur.endsWith('\n') ? '\n' : ''}${cur ? '\n' : ''}${block(script)}`;
-  if (next !== cur) {
-    fs.mkdirSync(home, { recursive: true });
-    fs.writeFileSync(cfg, next);
+  let cur;
+  try {
+    cur = fs.readFileSync(cfg, 'utf8');
+  } catch {
+    return false;
   }
+  if (!BLOCK_RE.test(cur)) return false;
+  fs.writeFileSync(cfg, cur.replace(BLOCK_RE, '').replace(/\n{3,}/g, '\n\n'));
   return true;
 }
 
-module.exports = { writeCodexBridgeConfig, ENV_VARS };
+module.exports = { removeCodexBridgeConfig, ENV_VARS };

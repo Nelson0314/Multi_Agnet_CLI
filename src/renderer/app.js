@@ -522,6 +522,17 @@ function paneTitle(p) {
   return p.name || t('session.new', { kind: kindLabel(p.kind) });
 }
 
+// 這個窗格帶上了哪些「另一個工具」的設定（Codex 窗格：Claude 的指示、skills、MCP；Claude 窗格：AGENTS.md）
+function sharedNote(p) {
+  const sh = p.shared;
+  if (!sh || !(sh.sources.length || sh.skills.length || sh.mcp.length)) return '';
+  const lines = [t(p.kind === 'codex' ? 'shared.fromClaude' : 'shared.fromCodex')];
+  if (sh.sources.length) lines.push(`${t('shared.instructions')}: ${sh.sources.join(', ')}`);
+  if (sh.skills.length) lines.push(`${t('shared.skills')}: ${sh.skills.join(', ')}`);
+  if (sh.mcp.length) lines.push(`${t('shared.mcp')}: ${sh.mcp.join(', ')}`);
+  return lines.join('\n');
+}
+
 function renderPaneHead(p) {
   const prof = p.kind === 'shell' ? null : accountOf(toolOf(p.kind), p.profileId);
   const head = $('.pane-head', p.el);
@@ -530,7 +541,7 @@ function renderPaneHead(p) {
   const titleEl = $('.pane-title', head);
   if (!titleEl.querySelector('input')) {
     titleEl.textContent = paneTitle(p);
-    titleEl.title = `${paneTitle(p)}\n${p.kind === 'shell' ? p.cwd : p.sessionId || t('session.waitingId')}\n${t('session.renameHint')}`;
+    titleEl.title = `${paneTitle(p)}\n${p.kind === 'shell' ? p.cwd : p.sessionId || t('session.waitingId')}${sharedNote(p) ? `\n\n${sharedNote(p)}` : ''}\n${t('session.renameHint')}`;
   }
   const pt = $('.tag.profile', head);
   pt.textContent = prof ? profileName(prof) : '';
@@ -657,6 +668,7 @@ async function startPty(p, { prompt } = {}) {
   p.sessionId = r.sessionId || p.sessionId;
   p.profileId = r.profileId;
   p.codexProfileId = r.codexProfileId || null;
+  p.shared = r.shared || null;
   p.startedAt = p.lastData = Date.now();
   paneByPty.set(p.id, p);
   const buffered = pendingData.get(p.id);
@@ -803,10 +815,14 @@ function signedIn(tool, p) {
   return !!(a.email || (u && u.ok));
 }
 
-// 其他帳號：還有額度、已登入的排前面，剩最多的優先
+// 共用 session 歷史的帳號之間才能續跑同一個 session（預設帳號就是歷史本身）
+const sharesHistory = (p) => !!p && (p.id === 'default' || p.shareHistory !== false);
+
+// 可以把窗格換過去的其他帳號：還有額度、已登入的排前面，剩最多的優先
 function otherAccounts(tool, excludeId) {
+  if (!sharesHistory(accountOf(tool, excludeId))) return [];
   return accountsOf(tool)
-    .filter((p) => p.id !== excludeId)
+    .filter((p) => p.id !== excludeId && sharesHistory(p))
     .map((p) => {
       const st = quotaState(tool, p.id);
       return { profile: p, state: st, left: quotaLeft(tool, p.id), viable: st !== 'out' && signedIn(tool, p), note: usageNote(tool, p.id) };
@@ -1035,15 +1051,11 @@ async function movePane(p, profileId) {
   const prompt = p.limitHit && S.settings.limitContinue !== false ? continuePrompt() : null;
   p.pendingMove = null;
   hideBanner(p);
-  if (!p.sessionId) return toast(t('handoff.noId'), 'bad');
+  if (!p.sessionId) return toast(t('switch.noId'), 'bad');
+  if (!sharesHistory(target) || !sharesHistory(accountOf(tool, p.profileId))) return toast(t('switch.noHistory', { name: profileName(target) }), 'bad');
   p.moving = true;
   try {
-    if (target.id !== 'default' && !target.shareHistory) {
-      toast(t('switch.noHistory', { name: profileName(target) }));
-      await handoff(p, p.kind, { inPlace: true, profileId, reason: 'switch-profile' });
-    } else {
-      await restartPane(p, { profileId, prompt });
-    }
+    await restartPane(p, { profileId, prompt });
   } finally {
     p.moving = false;
   }
@@ -1052,22 +1064,6 @@ async function movePane(p, profileId) {
 async function switchProfile(p, profileId) {
   toast(t('switch.started', { name: profileName(accountOf(toolOf(p.kind), profileId)), title: paneTitle(p) }), 'ok');
   await movePane(p, profileId);
-}
-
-async function handoff(p, toKind, { inPlace = false, profileId = null, reason = 'manual' } = {}) {
-  if (!p.sessionId) return toast(t('handoff.noId'), 'bad');
-  let r;
-  try {
-    r = await api.createHandoff({ paneId: p.id, fromKind: p.kind, toKind, sessionId: p.sessionId, cwd: p.cwd, sessionName: paneTitle(p), reason, lang: S.lang });
-  } catch (e) {
-    return toast(t('handoff.failed', { msg: errMsg(e) }), 'bad');
-  }
-  const name = toKind === p.kind ? paneTitle(p) : `${paneTitle(p).replace(/ → (Claude|Codex)$/, '')} → ${kindLabel(toKind)}`;
-  // 換到另一個工具時，用那個工具目前的帳號
-  const account = profileId || (toolOf(toKind) === toolOf(p.kind) ? p.profileId : activeOf(toolOf(toKind)));
-  toast(t('handoff.started', { kind: kindLabel(toKind) }), 'ok');
-  if (inPlace) await restartPane(p, { kind: toKind, sessionId: null, prompt: r.prompt, name, profileId: account });
-  else await spawnPane({ kind: toKind, prompt: r.prompt, name, cwd: p.cwd, profileId: account });
 }
 
 function paneMenu(p) {
@@ -1079,13 +1075,6 @@ function paneMenu(p) {
         onClick: () => switchProfile(p, o.profile.id),
       });
     }
-  }
-  if (p.kind === 'claude') {
-    items.push({ label: t('pane.toCodexNew'), onClick: () => handoff(p, 'codex') });
-    items.push({ label: t('pane.toCodexHere'), onClick: () => handoff(p, 'codex', { inPlace: true }) });
-  } else if (p.kind === 'codex') {
-    items.push({ label: t('pane.toClaudeNew'), onClick: () => handoff(p, 'claude') });
-    items.push({ label: t('pane.toClaudeHere'), onClick: () => handoff(p, 'claude', { inPlace: true }) });
   }
   if (items.length) items.push('-');
   items.push({ label: t('pane.restart'), onClick: () => restartPane(p) });
@@ -1350,7 +1339,7 @@ function showAccountMenu(tool, anchor) {
   if (cur.id !== 'default') items.push({ label: t('profile.remove', { name: profileName(cur) }), onClick: () => removeProfileFlow(tool) });
   const others = movablePanes(tool, cur.id);
   if (others.length) items.push({ label: t('profile.moveHere', { n: others.length, name: profileName(cur) }), onClick: () => movePanes(others, cur.id) });
-  items.push('-', tool === 'claude' ? { label: t('profile.installMcp'), onClick: installMcp } : { label: t('profile.installBridge'), onClick: installBridge });
+  if (tool === 'claude') items.push('-', { label: t('profile.installMcp'), onClick: installMcp });
   showPopover(anchor, items);
 }
 
@@ -1484,12 +1473,6 @@ async function removeProfileFlow(tool) {
   reloadProfiles();
 }
 
-async function installBridge() {
-  toast(t('bridge.installing'));
-  const r = await api.installBridge(activeOf('codex'));
-  toast(r.ok ? t('bridge.installed', { out: r.output }) : t('mcp.failed', { out: r.output }), r.ok ? 'ok' : 'bad', 9000);
-}
-
 async function installMcp() {
   toast(t('mcp.running'));
   const r = await api.installCodexMcp(activeOf('claude'));
@@ -1598,7 +1581,8 @@ function renderSettings() {
       t('set.fallback.auto'),
       st.fallback,
     )}${opt('off', t('set.fallback.off'), st.fallback)}</select></label>
-    <label title="${esc(t('set.limitContinueHint'))}">${esc(t('set.limitContinue'))}<input type="checkbox" id="setLimitContinue" ${st.limitContinue !== false ? 'checked' : ''}></label>`;
+    <label title="${esc(t('set.limitContinueHint'))}">${esc(t('set.limitContinue'))}<input type="checkbox" id="setLimitContinue" ${st.limitContinue !== false ? 'checked' : ''}></label>
+    <label title="${esc(t('set.shareHint'))}">${esc(t('set.share'))}<input type="checkbox" id="setShare" ${st.shareInstructions !== false ? 'checked' : ''}></label>`;
   $('#setTheme').onchange = async (e) => {
     await saveSettings({ theme: e.target.value, windowBg: THEMES[e.target.value].ui.bg });
     applyTheme();
@@ -1617,6 +1601,7 @@ function renderSettings() {
   $('#setBridgeConfirm').onchange = (e) => saveSettings({ bridgeConfirm: e.target.checked });
   $('#setFallback').onchange = (e) => saveSettings({ fallback: e.target.value });
   $('#setLimitContinue').onchange = (e) => saveSettings({ limitContinue: e.target.checked });
+  $('#setShare').onchange = (e) => saveSettings({ shareInstructions: e.target.checked });
 }
 
 async function setLang(lang) {

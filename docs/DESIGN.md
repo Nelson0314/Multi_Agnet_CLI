@@ -1,4 +1,4 @@
-# 設計說明：Claude 為主、Codex 為輔
+# 設計說明：Claude 與 Codex 一起工作
 
 ## 出發點
 
@@ -41,18 +41,33 @@ MCP 叫出來的 Codex 一樣會寫 `~/.codex/sessions/...`，紀錄裡有專案
 - Codex 回報後自己跑測試確認，不要直接採信它的結論。
 ```
 
-### 一份共用規則
+## Codex 加入團隊
 
-Claude 讀 `CLAUDE.md`，Codex 讀 `AGENTS.md`。把共同規則寫在 `AGENTS.md`，在 `CLAUDE.md` 用 import 引用：
+### 同一套指示
 
-```markdown
-@AGENTS.md
+Claude 讀 `CLAUDE.md`，Codex 讀 `AGENTS.md`，各自的 skills、MCP server 也各放各的。兩個 agent 一起做事時，最容易出錯的是一邊知道使用者的規則、另一邊不知道。所以每個窗格啟動時，程式把「另一個工具」的設定一起帶上，使用者不用維護兩份：
 
-## 只給 Claude 的規則
-...
-```
+- Codex 窗格：全域與專案的 `CLAUDE.md`（含 `CLAUDE.local.md`、`.claude/CLAUDE.md`、`.claude/rules`，`@import` 展開）、Claude 的 skills 清單、Claude 的 MCP server。
+- Claude 窗格：專案的 `AGENTS.md` 與 `$CODEX_HOME/AGENTS.md`。
+- 對方本來就會讀的檔案不重複放（例如 Codex 本來就讀 `AGENTS.md`，`CLAUDE.md` 裡 `@AGENTS.md` 的部分就略過）。
 
-兩邊接手時看的是同一份規則。
+做法是啟動參數，不寫進使用者的設定檔：
+
+| | Claude 窗格 | Codex 窗格 |
+| --- | --- | --- |
+| 窗格互通工具 | `--mcp-config` | `-c mcp_servers.multi-agent={...}`（`env_vars` 轉交連線資訊，token 不出現在參數裡） |
+| 指示 | `--append-system-prompt-file` | `-c developer_instructions=...`，放在使用者自己的 `developer_instructions` 後面 |
+| 對方的 MCP server | 不轉（Claude 用自己的設定） | `-c mcp_servers.<name>={...}` |
+
+Codex 沒有「額外 skill 資料夾」的設定，所以 Claude 的 skills 以清單放進指示（名稱、說明、`SKILL.md` 路徑），用到時由 Codex 自己讀檔，跟 Codex 呈現自己 skills 的方式相同。
+
+轉 MCP server 的限制（都用 Codex 0.159 的 `codex debug prompt-input` 驗證過）：一個表格同時有 `command` 和 `url` 時 Codex 會無法啟動，所以只產生其中一種；`-c` 不接受加引號的名稱，含 `.` 的 server 名稱略過；SSE 類型 Codex 不支援，略過。
+
+Windows 的指令經過 `cmd.exe`，總長約 8 KB、不能有換行，放不下整份指示，所以改寫成每個專案固定位置的檔案，`developer_instructions` 只留一句請 Codex 先讀它。
+
+### 中途加入也跟得上
+
+團隊說明要求 agent 在接手或繼續別的窗格的工作之前，先用 `list_panes` 與 `read_pane`（`messages`）讀那個窗格最近的對話。`messages` 只取使用者與 agent 的文字，不含工具輸出。
 
 ## 額度用完時
 
@@ -98,20 +113,6 @@ Claude 讀 `CLAUDE.md`，Codex 讀 `AGENTS.md`。把共同規則寫在 `AGENTS.m
 
 Claude 的 `.claude.json` 存著登入身分，不能整個共用；但資料夾信任、user / local scope 的 MCP server、已允許的工具、首次使用設定也在裡面。新帳號少了這些，續跑時會先跳出主題設定或「信任這個資料夾嗎？」，自動送出的「繼續」就卡住了，也會少了 MCP 工具。所以開 Claude 窗格前，程式把預設帳號的這幾項補進目標帳號，只補缺的，不覆蓋目標帳號自己的設定。
 
-### 交接文件而不是轉換對話紀錄
-
-窗格的 `⇄` 可以手動把工作交給另一個工具。程式不把 Claude 的對話紀錄轉成 Codex 的格式：兩邊的工具呼叫與系統提示格式不同，轉過去也讀不懂；兩個 agent 真正共用的狀態是工作目錄和 git。
-
-所以交接文件（`.multi-agent/handoffs/<時間>-claude-to-codex.md`）只放接手需要的內容：
-
-- 原始需求（第一個使用者訊息）
-- 待辦清單的最後狀態（來自 `TodoWrite`）
-- 這個 session 改過的檔案（來自 Edit、Write、apply_patch）
-- 目前分支、`git status`、`git diff --stat`
-- 最近 12 則對話，只有文字，不含工具輸出
-
-接手的 prompt 要對方先讀文件，用 git 確認程式碼現況，簡短回報進度和下一步，然後繼續。文件會依介面語言寫成中文或英文。這個資料夾會加進 `.git/info/exclude`，不會出現在 `git status`。換到不共用歷史的帳號時，也用交接文件開新 session。
-
 ## 帳號
 
 - Claude 帳號是 `{ 名稱, CLAUDE_CONFIG_DIR }`，Codex 帳號是 `{ 名稱, CODEX_HOME }`，兩份清單、兩個目前帳號，互不影響。預設帳號就是原本的 `~/.claude` 與 `~/.codex`。
@@ -122,7 +123,7 @@ Claude 的 `.claude.json` 存著登入身分，不能整個共用；但資料夾
 
 ## 之後可以做的
 
-- context 超過 80% 時，在窗格上建議 `/compact`，或開新 session 並附上交接文件。
+- context 超過 80% 時，在窗格上建議 `/compact`。
 - 用 Claude Code 的 `Notification` 與 `Stop` hook 回報哪個 session 在等輸入，在窗格標題上提示。
 - Claude 呼叫 Codex 時，自動在空窗格打開那個 Codex session。
 - 額度恢復後，把窗格換回原本的帳號。

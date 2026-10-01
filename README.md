@@ -70,7 +70,7 @@ npm install
 | 切換窗格 | `Ctrl/⌘ + 1…6` |
 | 側欄 | 預設收成一條細邊，只留一個 `›`；滑鼠移上去會浮出完整側欄。按 `‹` `›` 或 `Ctrl/⌘ + B` 固定展開或收起 |
 | 複製、貼上 | macOS 用 `⌘C` `⌘V`；Windows、Linux 用 `Ctrl+Shift+C` `Ctrl+Shift+V`。`Ctrl+V` 留給 Claude Code 貼圖片 |
-| 換帳號續跑、交給 Codex 或 Claude | 窗格右上 `⇄` |
+| 換帳號續跑、重新開啟 | 窗格右上 `⇄` |
 | 登入、新增、切換帳號 | 右上角的 Claude、Codex 帳號選單 |
 | 主題、字級、字型、語言 | 儀表板的「外觀」 |
 | 窗格按鈕 | 滑鼠移到窗格上，或窗格是目前焦點時才會出現 |
@@ -125,19 +125,33 @@ Claude Code 在啟動時決定用哪個帳號，執行中的程式換不了。�
 
 Codex 當子 agent：帳號選單的「讓 Claude 可以呼叫 Codex」會執行 `claude mcp add --scope user codex -- codex mcp-server`。之後 Claude 可以用 `codex` 開 Codex session、用 `codex-reply` 接著對話。被 Claude 叫出來的 Codex session 會出現在左側 Codex 分頁，標記為「子 agent」，點開就能看它做了什麼，也可以直接接手。
 
-手動交接：窗格的 `⇄` 可以把工作交給另一個工具，程式會寫一份交接文件，啟動另一個工具並要它先讀文件。額度用完時不會交給另一個工具，只會換同一個工具的帳號。
+### Codex 加入團隊
 
-交接文件寫在專案的 `.multi-agent/handoffs/`，內容包含原始需求、待辦清單、改過的檔案、`git status` 與 `git diff --stat`、最近 12 則對話。這個資料夾會自動加進 `.git/info/exclude`。
+不用另外設定，Codex 窗格一打開就跟 Claude 窗格站在同一個起點：
+
+| Codex 窗格會帶上 | 來源 |
+| --- | --- |
+| 窗格之間對話的工具與團隊說明 | 本程式（用 `-c` 傳入，不改你的 `config.toml`） |
+| 你寫給 Claude 的全域指示 | 目前 Claude 帳號的 `~/.claude/CLAUDE.md` |
+| 專案指示 | 從檔案系統根目錄到工作資料夾每一層的 `CLAUDE.md`、`.claude/CLAUDE.md`、`CLAUDE.local.md`，以及 `.claude/rules/*.md`。`@path` import 會展開；有 `paths` 的規則只列出適用範圍，用到時再讀 |
+| Skills | `~/.claude/skills` 與專案 `.claude/skills` 的名稱、說明與 `SKILL.md` 路徑。Codex 自己已經有同名 skill 的不重複 |
+| MCP server | Claude 的 user、local scope 與已核准的專案 `.mcp.json`。stdio 與 HTTP 的會轉過去，`${VAR}` 會展開；SSE 和名稱含 `.` 的略過；Codex `config.toml` 已有同名的以 Codex 為準 |
+
+反過來，Claude 窗格會帶上專案的 `AGENTS.md`（`CLAUDE.md` 已經 `@AGENTS.md` 的話不重複）和 `$CODEX_HOME/AGENTS.md`。你在 Codex 的 `config.toml` 自己寫的 `developer_instructions` 會保留在最前面。
+
+把滑鼠移到窗格標題上，可以看到這個窗格帶上了哪些檔案、skills 與 MCP server。不想共用的話，關掉儀表板設定的「Claude 與 Codex 共用指示」。
+
+中途加入的 agent 要跟上進度：團隊說明會要它先用 `list_panes` 與 `read_pane`（加 `messages`）讀其他窗格最近的對話，再開始做。
 
 ## 窗格之間對話
 
-每個 Claude 窗格啟動時會自動帶上一組 MCP 工具，並附上一段說明，讓 Claude 知道自己在多窗格環境裡，要跟其他窗格溝通時該用這些工具，而不是自己另開一個 `codex` 程序。不需要安裝。Codex 窗格要用的話，在帳號選單按一次「讓 Codex 窗格也能跟其他窗格對話」。
+每個 Claude 與 Codex 窗格啟動時都會自動帶上一組 MCP 工具，並附上一段說明，讓它知道自己在多窗格環境裡，要跟其他窗格溝通時該用這些工具，而不是自己另開一個 `claude` 或 `codex` 程序。不需要安裝。舊版寫進 Codex `config.toml` 的 `[mcp_servers.multi-agent]` 會在啟動時移除。
 
 | 工具 | 用途 |
 | --- | --- |
 | `list_panes` | 列出目前專案的窗格編號、類型、名稱 |
 | `send_to_pane` | 把訊息送進另一個窗格 |
-| `read_pane` | 讀另一個窗格最新的回覆；PowerShell 窗格則讀最後幾行畫面 |
+| `read_pane` | 讀另一個窗格最新的回覆，加上 `messages` 則讀最近幾則對話；PowerShell 窗格讀最後幾行畫面 |
 | `wait_for_reply` | 等 Claude 或 Codex 窗格回覆完，再把回覆交回來 |
 
 例如在 Claude 窗格說「請窗格 3 的 Codex review 我剛改的 src/api.ts，等它回覆後整理重點」，Claude 會自己呼叫這些工具，兩邊的對話都在你眼前。
@@ -175,6 +189,8 @@ Context 用量是最後一次主線回覆的 `input + cache_creation + cache_rea
 - Token 過期時額度暫時讀不到，在該帳號開任一個 session 就會更新。
 - Codex 的額度來自最近一次 Codex 回覆寫下的紀錄，這個帳號用過 Codex 之後才有資料。
 - 額度用完的偵測先比對終端機文字，再用額度數字確認。CLI 改了措辭時要更新 `src/main/ptyManager.js` 的 `LIMIT_PATTERNS`。
+- Claude 的權限設定、hooks、slash command 不會轉給 Codex，兩邊的機制不同。需要 OAuth 的遠端 MCP server 要在 Codex 另外登入（`codex mcp login <name>`）。
+- Windows 的指令經過 `cmd.exe`，長度有限又不能有換行，所以 Codex 窗格的共用指示寫成檔案，請 Codex 開始前先讀；macOS 與 Linux 直接放進啟動參數。
 - 換帳號會重新啟動窗格裡的程式：輸入框裡還沒送出的文字會不見，這個 session 裡開著的背景工作也會停止。純終端機窗格維持它開啟時的帳號。
 - Linux 捷徑帶 `--no-sandbox`，因為 npm 安裝的 Electron 沒有設定 setuid 的 `chrome-sandbox`。
 
@@ -191,7 +207,7 @@ npm run shortcut  # 重建桌面捷徑
 ```
 assets/              圖示（icon.svg 是來源）
 scripts/             postinstall、捷徑、圖示產生
-src/main/            Electron 主程式：session 讀取、額度、帳號、交接、pty
+src/main/            Electron 主程式：session 讀取、額度、帳號、共用指示、pty
 src/renderer/        介面：app.js、themes.js、i18n.js
 test/                node:test 單元測試
 ```

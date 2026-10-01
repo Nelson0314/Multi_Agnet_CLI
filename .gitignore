@@ -1,6 +1,5 @@
 node_modules/
 dist/
 out/
-.multi-agent/
 *.log
 .DS_Store

@@ -68,7 +68,7 @@ Platform notes:
 | Focus pane N | `Ctrl/⌘ + 1…6` |
 | Sidebar | Collapsed to a thin strip with a single `›` by default; hover to float the full sidebar over the panes. `‹` `›` or `Ctrl/⌘ + B` keeps it open or collapses it |
 | Copy, paste | `⌘C` `⌘V` on macOS; `Ctrl+Shift+C` `Ctrl+Shift+V` on Windows and Linux. `Ctrl+V` stays with Claude Code for pasting images |
-| Resume on another account, hand off | `⇄` on the pane |
+| Resume on another account, restart | `⇄` on the pane |
 | Sign in, add or switch accounts | The Claude and Codex account menus, top right |
 | Theme, font size, font, language | Dashboard, Appearance |
 | Pane buttons | Shown when the mouse is over a pane or the pane has focus |
@@ -121,19 +121,33 @@ The reasoning is in [docs/DESIGN.md](docs/DESIGN.md) (Traditional Chinese).
 
 Codex as a sub-agent: "Let Claude call Codex" in the account menu runs `claude mcp add --scope user codex -- codex mcp-server`. Claude can then start a Codex session with `codex` and continue it with `codex-reply`. Codex sessions started this way show up in the Codex tab with a sub-agent label, and you can open them to read or take over.
 
-Manual handoff: `⇄` on a pane can hand the work to the other tool. The app writes a handoff file and starts the other tool, told to read it first. Running out of usage never hands work to the other tool; it only switches accounts of the same tool.
+### Codex joins the team
 
-Handoff files go to `.multi-agent/handoffs/` in the project and contain the original request, the todo list, changed files, `git status`, `git diff --stat` and the last 12 messages. The folder is added to `.git/info/exclude`.
+No setup. A Codex pane starts from the same place as a Claude pane:
+
+| A Codex pane gets | From |
+| --- | --- |
+| The pane-to-pane tools and a short team note | This app, passed with `-c` so your `config.toml` is not changed |
+| Your global instructions for Claude | `~/.claude/CLAUDE.md` of the active Claude account |
+| Project instructions | `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md` in every folder from the filesystem root down to the working folder, plus `.claude/rules/*.md`. `@path` imports are expanded. Rules with `paths` are listed with their scope and read when needed |
+| Skills | Name, description and `SKILL.md` path of each skill in `~/.claude/skills` and the project's `.claude/skills`, unless Codex already has a skill with that name |
+| MCP servers | Claude's user and local servers and the approved ones in the project's `.mcp.json`. stdio and HTTP servers are carried over with `${VAR}` expanded. SSE servers and names containing `.` are skipped. A server already defined in Codex's `config.toml` keeps Codex's definition |
+
+The other way round, Claude panes get the project's `AGENTS.md` (unless `CLAUDE.md` already imports it) and `$CODEX_HOME/AGENTS.md`. Any `developer_instructions` you set in Codex's `config.toml` stay first.
+
+Hover a pane title to see which files, skills and MCP servers it was given. To turn this off, clear "Share instructions between Claude and Codex" in the dashboard settings.
+
+To catch up when it joins mid-task, the team note tells each agent to read the other panes' recent conversation with `list_panes` and `read_pane` (with `messages`) before it starts.
 
 ## Panes talking to each other
 
-Every Claude pane starts with a set of MCP tools and a short note telling Claude it runs next to other panes and should use these tools to reach them, instead of starting its own `codex` process. Nothing to install. For Codex panes, click "Let Codex panes talk to other panes" in the account menu once.
+Every Claude and Codex pane starts with a set of MCP tools and a short note telling the agent it runs next to other panes and should use these tools to reach them, instead of starting its own `claude` or `codex` process. Nothing to install. The `[mcp_servers.multi-agent]` block older versions wrote to Codex's `config.toml` is removed at startup.
 
 | Tool | What it does |
 | --- | --- |
 | `list_panes` | Pane numbers, kinds and names in the current project |
 | `send_to_pane` | Send a message to another pane |
-| `read_pane` | Read another pane's latest reply, or the last screen lines of a shell pane |
+| `read_pane` | Read another pane's latest reply, or with `messages` its recent conversation; for a shell pane, the last screen lines |
 | `wait_for_reply` | Wait until a Claude or Codex pane finishes answering and return the reply |
 
 For example, tell the Claude pane "ask the Codex in pane 3 to review src/api.ts and summarize its reply". Claude calls the tools itself, and both sides of the conversation stay on screen.
@@ -171,6 +185,8 @@ Context usage is `input + cache_creation + cache_read` tokens of the last main-t
 - With an expired token, usage is unavailable until you open any session on that account.
 - Codex usage comes from the last Codex reply, so it appears after you have used Codex once on that account.
 - Limit detection matches terminal text and then checks the usage numbers. If a CLI changes its wording, update `LIMIT_PATTERNS` in `src/main/ptyManager.js`.
+- Claude's permission rules, hooks and slash commands are not carried over to Codex; the two work differently. Remote MCP servers that need OAuth have to be signed in from Codex separately (`codex mcp login <name>`).
+- On Windows the command goes through `cmd.exe`, which limits length and cannot carry line breaks, so a Codex pane's shared instructions are written to a file that Codex is told to read first. macOS and Linux pass them directly.
 - Moving a pane restarts its process. Text typed into the input box but not sent is lost, and background tasks started inside that session stop. Shell panes keep the account they started with.
 - The Linux shortcut passes `--no-sandbox` because Electron installed from npm has no setuid `chrome-sandbox`.
 
