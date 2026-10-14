@@ -73,6 +73,7 @@ npm install
 | 換帳號續跑、重新開啟 | 窗格右上 `⇄` |
 | 登入、新增、切換帳號 | 右上角的 Claude、Codex 帳號選單 |
 | 主題、字級、字型、語言 | 儀表板的「外觀」 |
+| Remote Control | Claude 窗格預設用 `claude --remote-control` 啟動，可以在 claude.ai 或 Claude App 接著操作。不要的話關掉儀表板設定的「Claude 窗格開啟 Remote Control」，之後開啟或重新開啟的窗格生效 |
 | 窗格按鈕 | 滑鼠移到窗格上，或窗格是目前焦點時才會出現 |
 
 關閉窗格只會結束程式，session 紀錄留在硬碟上，隨時可以從清單再開。

@@ -1582,6 +1582,7 @@ function renderSettings() {
       st.fallback,
     )}${opt('off', t('set.fallback.off'), st.fallback)}</select></label>
     <label title="${esc(t('set.limitContinueHint'))}">${esc(t('set.limitContinue'))}<input type="checkbox" id="setLimitContinue" ${st.limitContinue !== false ? 'checked' : ''}></label>
+    <label title="${esc(t('set.remoteControlHint'))}">${esc(t('set.remoteControl'))}<input type="checkbox" id="setRemoteControl" ${st.remoteControl !== false ? 'checked' : ''}></label>
     <label title="${esc(t('set.shareHint'))}">${esc(t('set.share'))}<input type="checkbox" id="setShare" ${st.shareInstructions !== false ? 'checked' : ''}></label>`;
   $('#setTheme').onchange = async (e) => {
     await saveSettings({ theme: e.target.value, windowBg: THEMES[e.target.value].ui.bg });
@@ -1601,6 +1602,7 @@ function renderSettings() {
   $('#setBridgeConfirm').onchange = (e) => saveSettings({ bridgeConfirm: e.target.checked });
   $('#setFallback').onchange = (e) => saveSettings({ fallback: e.target.value });
   $('#setLimitContinue').onchange = (e) => saveSettings({ limitContinue: e.target.checked });
+  $('#setRemoteControl').onchange = (e) => saveSettings({ remoteControl: e.target.checked });
   $('#setShare').onchange = (e) => saveSettings({ shareInstructions: e.target.checked });
 }
 

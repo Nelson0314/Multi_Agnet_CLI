@@ -207,8 +207,10 @@ function claudePaneArgs(paneId, { cwd, codexProfile, claudeProfile }) {
   fs.writeFileSync(hint, [teamHint('Codex'), ctx.text].filter(Boolean).join('\n'));
   const settings = path.join(dir, 'claude-settings.json');
   fs.writeFileSync(settings, JSON.stringify({ statusLine: { type: 'command', command: `node ${JSON.stringify(STATUS_SCRIPT)}`, padding: 0 } }));
-  // --mcp-config 可接多個值，放在最前面、後面緊接其他旗標，才不會吃掉後面的參數
-  return { args: ['--mcp-config', mcp, '--append-system-prompt-file', hint, '--settings', settings], shared: { sources: ctx.sources, skills: [], mcp: [] } };
+  // --mcp-config 可接多個值，後面緊接其他旗標，才不會吃掉後面的參數。
+  // --remote-control 後面可以接一個名稱，所以放最前面、後面緊接旗標，才不會把 session 名稱或「繼續」當成它的名稱
+  const rc = store.data.settings.remoteControl !== false ? ['--remote-control'] : [];
+  return { args: [...rc, '--mcp-config', mcp, '--append-system-prompt-file', hint, '--settings', settings], shared: { sources: ctx.sources, skills: [], mcp: [] } };
 }
 
 // Codex 窗格：用 -c 帶上 multi-agent 工具、團隊說明、寫給 Claude 的指示與 skills、Claude 的 MCP server。

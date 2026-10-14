@@ -71,6 +71,7 @@ Platform notes:
 | Resume on another account, restart | `⇄` on the pane |
 | Sign in, add or switch accounts | The Claude and Codex account menus, top right |
 | Theme, font size, font, language | Dashboard, Appearance |
+| Remote Control | Claude panes start with `claude --remote-control` by default, so you can continue them from claude.ai or the Claude app. Clear "Remote Control for Claude panes" in the dashboard settings to stop; it applies to panes opened or restarted afterwards |
 | Pane buttons | Shown when the mouse is over a pane or the pane has focus |
 
 Closing a pane ends the process. The session stays on disk and can be reopened from the list.
